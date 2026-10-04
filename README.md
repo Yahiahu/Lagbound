@@ -15,18 +15,20 @@ one cluster gives 0.)
 
 The code is the pipeline that produced these results on graphs with up to 117 million edges:
 
-| Network | nodes | edges | L | U | gap |
-|---|---:|---:|---:|---:|---:|
-| web-Stanford | 282K | 2.0M | 0.928168 | 0.946186 | 1.94% |
-| eu-2005 | 863K | 16.1M | 0.941251 | 0.960156 | 2.01% |
-| web-NotreDame | 326K | 1.1M | 0.945251 | 0.971975 | 2.83% |
-| ogbn-products | 2.40M | 61.9M | 0.883616 | 0.917364 | 3.82% |
-| Hollywood-2011 | 1.99M | 114.5M | 0.760396 | 0.792885 | 4.27% |
-| coPapersCiteseer | 434K | 16.0M | 0.922782 | 0.965636 | 4.64% |
-| Hollywood-2009 | 1.11M | 56.4M | 0.754869 | 0.790502 | 4.72% |
-| coPapersDBLP | 540K | 15.2M | 0.867411 | 0.912993 | 5.26% |
+| Network | nodes | edges | L | U | gap | status |
+|---|---:|---:|---:|---:|---:|---|
+| web-Stanford | 282K | 2.0M | 0.928168 | 0.946186 | 1.94% | verified |
+| eu-2005 | 863K | 16.1M | 0.941251 | 0.960156 | 2.01% | verified |
+| web-NotreDame | 326K | 1.1M | 0.945251 | 0.971975 | 2.83% | verified |
+| ogbn-products | 2.40M | 61.9M | 0.883616 | 0.917364 | 3.82% | certified, not replayed |
+| Hollywood-2011 | 1.99M | 114.5M | 0.760396 | 0.792885 | 4.27% | verified |
+| coPapersCiteseer | 434K | 16.0M | 0.922782 | 0.965636 | 4.64% | verified |
+| Hollywood-2009 | 1.11M | 56.4M | 0.754869 | 0.790502 | 4.72% | verified |
+| coPapersDBLP | 540K | 15.2M | 0.867411 | 0.912993 | 5.26% | verified |
 
-All upper bounds are certified; all except ogbn-products were also accepted by the independent verifier.
+"Verified" means the certificate was also re-checked by the independent verifier. The ogbn-products bound was
+certified by a full factorization of its certificate (773 GB, 6.6e15 flops), but its proof file was never replayed
+by the verifier.
 
 ## Install
 
@@ -40,7 +42,8 @@ or from a clone:
 pip install -e .
 ```
 
-Requires Python 3.10+, NumPy, SciPy, Numba, python-igraph, and PyMetis. Linux and macOS. The first run compiles
+Requires Python 3.10+, NumPy, SciPy, Numba, python-igraph, and PyMetis. The test suite runs with Python 3.11,
+NumPy 2.4, and Numba 0.68. Linux and macOS. The first run compiles
 the Numba kernels (about a minute); later runs use the cache in `~/.cache/lagbound/numba`.
 
 Optional: `pip install scikit-sparse` (needs SuiteSparse) makes the certificate use CHOLMOD instead of SciPy's
@@ -117,7 +120,7 @@ lagbound graph.txt --json
 | field | meaning |
 |---|---|
 | `value` | the upper bound |
-| `status` | `"verified"`, `"certified"`, or `"estimate"` |
+| `status` | `"verified"`, `"certified"`, `"rejected"` (verification was requested and failed), or `"estimate"` |
 | `estimate` | the solver's bound estimate before certification |
 | `certificate` | path of the certificate file (`.npz`) |
 | `details` | estimates, certificate and verification summaries |
@@ -127,7 +130,8 @@ lagbound graph.txt --json
 `bound` returns a `BoundResult` with `lower`, `upper`, `absolute_gap` (`U - L`), `gap` (`(U - L) / L`, or `None`
 when `L <= 0`), `partition`, and `summary()`.
 
-Only `"certified"` and `"verified"` values are proven bounds. An `"estimate"` is the solver's own number and can
+Only `"certified"` and `"verified"` values are proven bounds. A `"rejected"` value is the certifier's number after the
+verifier refused it; do not use it as a bound. An `"estimate"` is the solver's own number and can
 be slightly too low.
 
 ## How it works

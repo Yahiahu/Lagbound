@@ -30,9 +30,10 @@ class LowerBound:
 class UpperBound:
     """Upper bound on the maximum modularity.
 
-    ``status`` is ``"verified"`` (certified and re-checked by the independent verifier), ``"certified"``, or
-    ``"estimate"``; ``value`` is the bound with that status. ``estimate`` is the solver's estimate before
-    certification, and ``certificate`` is the path of the stored proof object.
+    ``status`` is ``"verified"`` (certified and re-checked by the independent verifier), ``"certified"``,
+    ``"rejected"`` (verification was requested and failed; ``value`` is then not a bound), or ``"estimate"``.
+    ``estimate`` is the solver's estimate before certification, and ``certificate`` is the path of the stored proof
+    object.
     """
 
     value: float
@@ -211,6 +212,7 @@ def upper_bound(graph, time_limit: float = 3600.0, partition=None, lower: float 
                 value, status = float(res["UB"]), "verified"
                 ws.say(f"verified upper bound {value:.6f}")
             else:
+                status = "rejected"
                 ws.say(f"verification failed: {res.get('fail', 'see verify.log')}")
             stages.append(("verification", time.time() - t0))
     return UpperBound(value=value, status=status, estimate=estimate, certificate=cert_file, details=details,
