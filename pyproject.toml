@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lagbound"
+version = "0.1.0"
+description = "Certified upper and lower bounds for modularity maximization on large graphs"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.22",
+    "scipy>=1.9",
+    "numba>=0.57",
+    "igraph>=0.10",
+    "pymetis>=2023.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/Yahiahu/Lagbound"
+
+[project.optional-dependencies]
+cholmod = ["scikit-sparse>=0.4"]
+networkx = ["networkx>=2.6"]
+test = ["pytest>=7", "networkx>=2.6"]
+
+[project.scripts]
+lagbound = "lagbound.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"lagbound._core" = ["*.c"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
