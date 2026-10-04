@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import gzip
 import os
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -83,6 +84,8 @@ def _from_pairs(pairs, names=None) -> Graph:
     a = np.minimum(pairs[:, 0], pairs[:, 1]).astype(np.int64)
     b = np.maximum(pairs[:, 0], pairs[:, 1]).astype(np.int64)
     keep = a != b
+    if not keep.all():
+        _warn(f"{int((~keep).sum())} self-loops removed")
     a, b = a[keep], b[keep]
     n_all = len(names)
     keys = np.unique(a * n_all + b)
@@ -119,6 +122,17 @@ def _read_edge_list(path: str) -> Graph:
     return _from_pairs(arr)
 
 
+def _warn(what: str):
+    warnings.warn(f"lagbound uses the simple undirected unweighted graph: {what}", stacklevel=3)
+
+
+def _check_matrix(values, asymmetric: int):
+    if np.any(values != 1):
+        _warn("matrix entries other than 0/1 treated as unweighted edges")
+    if asymmetric:
+        _warn("asymmetric matrix symmetrized")
+
+
 def as_graph(obj) -> Graph:
     """Convert any supported graph representation to a :class:`Graph` (see module docstring)."""
     if isinstance(obj, Graph):
@@ -127,11 +141,21 @@ def as_graph(obj) -> Graph:
         return _read_edge_list(os.fspath(obj))
     mod = type(obj).__module__
     if mod.startswith("networkx"):
+        if obj.is_directed():
+            _warn("edge directions ignored")
+        if obj.is_multigraph():
+            _warn("parallel edges merged")
+        if any(w != 1 for _, _, w in obj.edges(data="weight", default=1)):
+            _warn("edge weights ignored")
         nodes = list(obj.nodes())
         index = {node: i for i, node in enumerate(nodes)}
         pairs = np.array([(index[a], index[b]) for a, b in obj.edges()], dtype=np.int64).reshape(-1, 2)
         return _from_pairs(pairs, names=nodes)
     if mod.startswith("igraph"):
+        if obj.is_directed():
+            _warn("edge directions ignored")
+        if "weight" in obj.es.attributes() and any(w != 1 for w in obj.es["weight"]):
+            _warn("edge weights ignored")
         names = obj.vs["name"] if "name" in obj.vs.attributes() else list(range(obj.vcount()))
         return _from_pairs(np.array(obj.get_edgelist(), dtype=np.int64).reshape(-1, 2), names=list(names))
     if sp.issparse(obj):
@@ -139,9 +163,11 @@ def as_graph(obj) -> Graph:
         if C.shape[0] != C.shape[1]:
             raise ValueError("adjacency matrix must be square")
         mask = C.data != 0
+        _check_matrix(C.data[mask], (C.tocsr() != C.T.tocsr()).nnz)
         return _from_pairs(np.c_[C.row[mask], C.col[mask]], names=list(range(C.shape[0])))
     arr = np.asarray(obj)
     if arr.ndim == 2 and arr.shape[0] == arr.shape[1] and arr.shape[1] != 2:
         r, c = np.nonzero(arr)
+        _check_matrix(arr[r, c], int((arr != arr.T).sum()))
         return _from_pairs(np.c_[r, c], names=list(range(arr.shape[0])))
     return _from_pairs(arr)

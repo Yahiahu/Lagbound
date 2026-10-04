@@ -9,8 +9,9 @@ better a partition could be. Lagbound computes both sides:
 - an **upper bound** `U`: a value that no partition of the graph can exceed, backed by a certificate that a
   separate verifier re-checks in outward-rounded arithmetic.
 
-The true maximum lies in `[L, U]`. The relative gap `(U - L) / L` bounds how much any partition could improve on
-the one returned.
+The true maximum lies in `[L, U]`, so no partition beats the one returned by more than `U - L`. When `L > 0` the
+relative gap `(U - L) / L` says the same as a fraction. (The maximum is never negative, since putting all nodes in
+one cluster gives 0.)
 
 The code is the pipeline that produced these results on graphs with up to 117 million edges:
 
@@ -59,7 +60,7 @@ res = lagbound.bound(G, time_limit=60, verify=True)
 print(res.summary())
 # lower bound  0.419790  (best partition found)
 # upper bound  0.420290  (verified)
-# gap          0.12%
+# gap          0.000500  (0.12%)
 
 res.partition                            # {node: cluster} for the best partition
 res.lower.exact                          # Fraction(1277, 3042)
@@ -85,8 +86,9 @@ ub = lagbound.upper_bound(G, partition=my_labels)    # start the solver from you
 
 Any of: a NetworkX or igraph graph, a SciPy sparse or dense NumPy adjacency matrix, an `(m, 2)` array of edges,
 or the path to an edge-list file (`u v` per line, `#` and `%` comments, `.gz` allowed). Node names can be any
-hashable values. The graph is treated as simple and undirected: directions and weights are dropped, self-loops
-and duplicate edges removed. Isolated nodes cannot change modularity; they are set aside and returned as
+hashable values. Modularity is computed on the simple, undirected, unweighted graph: directions and weights are
+dropped, and self-loops and duplicate edges removed, with a warning when that changes the input. The bounds are
+for that graph, not for a weighted or directed version. Isolated nodes cannot change modularity; they are set aside and returned as
 singleton clusters.
 
 ### Command line
@@ -122,7 +124,8 @@ lagbound graph.txt --json
 | `workdir` | directory with checkpoints and logs of every stage |
 | `verify()` | runs the independent verifier on the certificate |
 
-`bound` returns a `BoundResult` with `lower`, `upper`, `gap`, `partition`, and `summary()`.
+`bound` returns a `BoundResult` with `lower`, `upper`, `absolute_gap` (`U - L`), `gap` (`(U - L) / L`, or `None`
+when `L <= 0`), `partition`, and `summary()`.
 
 Only `"certified"` and `"verified"` values are proven bounds. An `"estimate"` is the solver's own number and can
 be slightly too low.

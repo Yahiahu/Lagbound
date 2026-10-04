@@ -41,3 +41,24 @@ def test_modularity_matches_networkx():
         communities = [c for c in communities if c]
         expected = nx.algorithms.community.modularity(G, communities, weight=None)
         assert abs(modularity(G, labels) - expected) < 1e-12
+
+
+def test_dropped_information_warns():
+    import pytest
+    G = nx.Graph()
+    G.add_edge(0, 1, weight=3.0)
+    G.add_edge(1, 2)
+    with pytest.warns(UserWarning, match="weights ignored"):
+        as_graph(G)
+    with pytest.warns(UserWarning, match="self-loops"):
+        as_graph(np.array([[0, 1], [1, 1], [1, 2]]))
+    with pytest.warns(UserWarning, match="other than 0/1"):
+        as_graph(sp.csr_matrix(np.array([[0, 2], [2, 0]])))
+
+
+def test_gap_needs_positive_lower_bound():
+    from lagbound.api import BoundResult, LowerBound, UpperBound
+    lo = LowerBound(0.0, 0, np.zeros(3, int), {}, 0.0, None)
+    up = UpperBound(0.01, "certified", 0.01, None, {}, 0.0, "")
+    res = BoundResult(lo, up)
+    assert res.gap is None and abs(res.absolute_gap - 0.01) < 1e-15

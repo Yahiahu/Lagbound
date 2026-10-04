@@ -50,7 +50,7 @@ def main(argv=None) -> int:
             for node, cluster in res.partition.items():
                 fh.write(f"{node} {cluster}\n")
     if a.json:
-        out = {"gap": res.gap}
+        out = {"gap": res.gap, "absolute_gap": res.absolute_gap}
         if res.lower is not None:
             out["lower"] = {"value": res.lower.value, "exact": str(res.lower.exact),
                             "clusters": int(res.lower.membership.max()) + 1, "seconds": res.lower.seconds}

@@ -60,11 +60,18 @@ class BoundResult:
     upper: UpperBound | None
 
     @property
-    def gap(self) -> float | None:
-        """``(U - L) / L``: no partition can improve on the lower bound's partition by more than this fraction."""
+    def absolute_gap(self) -> float | None:
+        """``U - L``: no partition has modularity more than this above the lower bound's partition."""
         if self.lower is None or self.upper is None:
             return None
-        return (self.upper.value - self.lower.value) / self.lower.value
+        return self.upper.value - self.lower.value
+
+    @property
+    def gap(self) -> float | None:
+        """``(U - L) / L``, the relative version of :attr:`absolute_gap`; ``None`` unless ``L > 0``."""
+        if self.absolute_gap is None or self.lower.value <= 0:
+            return None
+        return self.absolute_gap / self.lower.value
 
     @property
     def partition(self) -> dict | None:
@@ -76,8 +83,9 @@ class BoundResult:
             rows.append(f"lower bound  {self.lower.value:.6f}  (best partition found)")
         if self.upper is not None:
             rows.append(f"upper bound  {self.upper.value:.6f}  ({self.upper.status})")
-        if self.gap is not None:
-            rows.append(f"gap          {100 * self.gap:.2f}%")
+        if self.absolute_gap is not None:
+            rel = f"  ({100 * self.gap:.2f}%)" if self.gap is not None else ""
+            rows.append(f"gap          {self.absolute_gap:.6f}{rel}")
         return "\n".join(rows)
 
 
