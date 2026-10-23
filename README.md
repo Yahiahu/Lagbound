@@ -13,22 +13,23 @@ The true maximum lies in `[L, U]`, so no partition beats the one returned by mor
 relative gap `(U - L) / L` says the same as a fraction. (The maximum is never negative, since putting all nodes in
 one cluster gives 0.)
 
-The code is the pipeline that produced these results on graphs with up to 117 million edges:
+The code is the pipeline that produced these results on graphs with up to 114.5 million edges:
 
 | Network | nodes | edges | L | U | gap | status |
 |---|---:|---:|---:|---:|---:|---|
-| web-Stanford | 282K | 2.0M | 0.928168 | 0.946186 | 1.94% | verified |
-| eu-2005 | 863K | 16.1M | 0.941251 | 0.960156 | 2.01% | verified |
-| web-NotreDame | 326K | 1.1M | 0.945251 | 0.971975 | 2.83% | verified |
-| ogbn-products | 2.40M | 61.9M | 0.883616 | 0.917364 | 3.82% | certified, not replayed |
-| Hollywood-2011 | 1.99M | 114.5M | 0.760396 | 0.792885 | 4.27% | verified |
-| coPapersCiteseer | 434K | 16.0M | 0.922782 | 0.965636 | 4.64% | verified |
-| Hollywood-2009 | 1.11M | 56.4M | 0.754869 | 0.790502 | 4.72% | verified |
-| coPapersDBLP | 540K | 15.2M | 0.867411 | 0.912993 | 5.26% | verified |
+| web-Stanford | 282K | 2.0M | 0.928191 | 0.946186 | 1.94% | verified |
+| eu-2005 | 863K | 16.1M | 0.941574 | 0.960156 | 1.97% | verified |
+| web-NotreDame | 326K | 1.1M | 0.945390 | 0.971975 | 2.81% | verified |
+| ogbn-products | 2.40M | 61.9M | 0.883424 | 0.917365 | 3.84% | verified |
+| Hollywood-2011 | 1.99M | 114.5M | 0.759931 | 0.792885 | 4.34% | verified |
+| coPapersCiteseer | 434K | 16.0M | 0.922867 | 0.965637 | 4.63% | verified |
+| Hollywood-2009 | 1.11M | 56.4M | 0.754784 | 0.790501 | 4.73% | verified |
+| coPapersDBLP | 540K | 15.2M | 0.867665 | 0.912993 | 5.22% | verified |
 
-"Verified" means the certificate was also re-checked by the independent verifier. The ogbn-products bound was
-certified by a full factorization of its certificate (773 GB, 6.6e15 flops), but its proof file was never replayed
-by the verifier.
+`L` is the modularity of a partition found by VieClus, rounded down (the library's own `lower_bound` uses Leiden);
+`U` is the certified upper bound, rounded up.
+"Verified" means the certificate was also re-checked by the independent verifier. All eight are verified; the
+ogbn-products replay took 13.1 h and peaked at about 481 GiB.
 
 ## Install
 
@@ -85,6 +86,33 @@ ub = lagbound.upper_bound(G, partition=my_labels)    # start the solver from you
 
 `lagbound.modularity(G, partition, exact=True)` evaluates any partition exactly.
 
+### Scoring a partition
+
+A certified bound belongs to the graph, not to the partition that came with it, so any other partition of the same
+graph can be scored against it without running the solver:
+
+```python
+s = lagbound.score(G, my_partition, upper=0.420290)            # your own bound U
+s = lagbound.score(G, my_partition, network="coPapersDBLP")    # a bound from the table above
+print(s.summary())
+s.modularity, s.exact                    # Q, float and Fraction
+s.improvement                            # (at_least, at_most)
+```
+
+`improvement` is the bracket `[max(0, L - Q) / Q, (U - Q) / Q]`, rounded outward: no partition improves on yours by
+more than the upper end, and a known partition already improves on it by the lower end (0 without `lower`). Both are
+`None` when `Q <= 0`. `lagbound.CERTIFIED` holds `L` and `U` for the eight networks above. With `network`, the graph's
+node and edge counts are checked against that network first, so a bound is never applied to a different graph.
+Explicit `upper` and `lower` take precedence over the network's values.
+
+On the command line, the partition is a file with one `node cluster` pair per line (the format `--partition-out`
+writes):
+
+```bash
+lagbound score graph.txt part.txt --network coPapersDBLP
+lagbound score graph.txt part.txt --upper 0.912993 --lower 0.867665 --json
+```
+
 ### Graph input
 
 Any of: a NetworkX or igraph graph, a SciPy sparse or dense NumPy adjacency matrix, an `(m, 2)` array of edges,
@@ -101,6 +129,8 @@ lagbound graph.txt                                   # both bounds
 lagbound graph.txt --lower-only --partition-out part.txt
 lagbound graph.txt --upper-only --time-limit 7200 --verify --workdir run1
 lagbound graph.txt --json
+lagbound score graph.txt part.txt --network web-Stanford   # score a partition against a certified bound
+lagbound score graph.txt part.txt --upper 0.42 --lower 0.41
 ```
 
 `lagbound --help` lists all options.
@@ -157,7 +187,9 @@ it a good one. The stages:
    priced into the bound with outward rounding, so the certified value is slightly above the estimate.
 7. **Verification** (optional). `verify_cert.py` reloads the certificate, checks that each constraint family is
    valid for every partition, checks the exact reductions against the original graph, and re-proves positive
-   semidefiniteness with its own factorization. See `VERIFIER_NOTES.md`.
+   semidefiniteness with its own factorization. For the reductions it recomputes from the original edge list that
+   every contraction is eligible (a degree-one node and its neighbour, or adjacent nodes with identical closed
+   neighbourhoods and `deg^2 < 2m`), not only that the bookkeeping is consistent. See `VERIFIER_NOTES.md`.
 
 The lower bound comes from converged Leiden runs followed by an ensemble refinement that contracts the nodes all
 good partitions agree on and re-runs Leiden on the result.
@@ -216,6 +248,7 @@ src/lagbound/
   pipeline.py    runs each stage of _core with the production flags
   graph.py       graph input
   modularity.py  exact modularity
+  score.py       score a partition against a certified bound
   cli.py         command line
   _core/         the research code that produced the results above
 ```

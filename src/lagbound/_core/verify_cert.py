@@ -12,6 +12,8 @@ CLAIM CHECKED.  For every partition X (X_ij = [i, j same community]) of the redu
     L * Q(X) = C0 + <B, X>,  B = W - d d^T / L                                    (exact reduction, see --orig)
             <= C0 + sum(lam) - sum(mu) + <C(y), X>                                   (valid constraints, y >= 0)
             <= C0 + sum(lam) - sum(mu) + sum(g) + sum(sdiag) + price_asm + price_psd = L * UB.
+  With --orig, every contracted group must also be joined by leaf / twin pairs that are eligible in the ORIGINAL graph
+  (degree one; or N[a] == N[b] with deg^2 < 2m), recomputed here, so the reduction keeps the optimum.
   C(y) = B + T(lam) + Nbr(mu) + Conn(om) + Pc(psi) + sum_levels S_pair + sum_VC S_vc  with the multiplier x slack terms
     triangle (i,j,k), centre j:  lam (1 - X_ij - X_jk + X_ik) >= 0        (every partition)
     psi (i,j):  psi X_ij >= 0;   pair level:  sig_QR sum_{i in Q, j in R, i != j} d_i d_j X_ij >= 0;
@@ -830,8 +832,58 @@ def identity_check(inst, c, S, vol, Ml, dense_max=3000, k=6, seed=1):
 
 
 # ============================================================================ 8. exact reduction check
+@njit(cache=True)
+def _uf_find(par, x):
+    while par[x] != x:
+        par[x] = par[par[x]]; x = par[x]
+    return x
+
+@njit(cache=True)
+def contraction_witness(ptr, col, deg, L, eu, ev):
+    """Join the endpoints of each edge (eu, ev) inside a contracted group when the edge is an ELIGIBLE pair of the original
+    graph, recomputed here from scratch:  leaf rule  deg_a == 1 or deg_b == 1 (a degree-one node and its only neighbour),
+    twin rule  N[a] == N[b] (closed neighbourhoods; a, b adjacent) and deg^2 < L (L = 2m).  Each rule holds in every optimal
+    partition, so a group whose members are joined by such pairs is together in every optimum.  Edges whose endpoints are
+    already joined are skipped (no witness needed).  Returns the union-find roots and the leaf / twin / rejected counts."""
+    n = len(deg); par = np.arange(n); nleaf = 0; ntwin = 0; nbad = 0
+    for e in range(len(eu)):
+        a = eu[e]; b = ev[e]; ra = _uf_find(par, a); rb = _uf_find(par, b)
+        if ra == rb: continue
+        if deg[a] == 1 or deg[b] == 1:
+            nleaf += 1
+        elif deg[a] == deg[b] and deg[a]*deg[a] < L:
+            i = ptr[a]; j = ptr[b]; ok = True                         # N(a) - {b} == N(b) - {a}, both rows sorted
+            while ok:
+                while i < ptr[a + 1] and col[i] == b: i += 1
+                while j < ptr[b + 1] and col[j] == a: j += 1
+                if i == ptr[a + 1] or j == ptr[b + 1]:
+                    ok = i == ptr[a + 1] and j == ptr[b + 1]; break
+                if col[i] != col[j]: ok = False
+                i += 1; j += 1
+            if not ok: nbad += 1; continue
+            ntwin += 1
+        else:
+            nbad += 1; continue
+        par[max(ra, rb)] = min(ra, rb)
+    roots = np.empty(n, np.int64)
+    for x in range(n): roots[x] = _uf_find(par, x)
+    return roots, nleaf, ntwin, nbad
+
+
+def check_contractions(no, uo, vo, deg, grp, n):
+    """every contracted group is connected by eligible leaf / twin pairs of the ORIGINAL graph (not trusted from the
+    reducer: degrees and closed neighbourhoods are recomputed from the original edge list)."""
+    A = sp.csr_matrix((np.ones(2*len(uo), np.int8), (np.r_[uo, vo], np.r_[vo, uo])), shape=(no, no)); A.sort_indices()
+    inside = grp[uo] == grp[vo]
+    roots, nleaf, ntwin, nbad = contraction_witness(A.indptr.astype(np.int64), A.indices.astype(np.int64), deg,
+                                                     2*len(uo), uo[inside], vo[inside])
+    need(len(np.unique(grp*no + roots)) == n, "a contracted group is not joined by eligible leaf / twin pairs")
+    return dict(eligible=True, leaf_unions=int(nleaf), twin_unions=int(ntwin), ineligible_inside_edges=int(nbad))
+
+
 def check_reduction(orig_dir, red_dir, inst, labels_file):
-    """original graph -> reduced instance bookkeeping (exact), and Q_orig(partition) == (C0 + <B', X'>)/L (fractions)."""
+    """original graph -> reduced instance bookkeeping (exact), eligibility of every contraction (leaf / twin rules
+    recomputed from the original graph), and Q_orig(partition) == (C0 + <B', X'>)/L (fractions)."""
     g = json.load(open(os.path.join(orig_dir, "graph.json"))); no = int(g["n"])
     keys = np.load(os.path.join(orig_dir, "keys.npy")).astype(np.int64); uo = keys//no; vo = keys % no; mo = len(keys)
     need(len(np.unique(keys)) == mo and (uo < vo).all(), "original graph not simple")
@@ -848,6 +900,7 @@ def check_reduction(orig_dir, red_dir, inst, labels_file):
     rk = inst["u"]*n + inst["v"]; o = np.argsort(rk)
     need(np.array_equal(kk, rk[o]) and np.array_equal(cnt.astype(np.float64), inst["w"][o]), "reduced weights != original edge counts")
     res["bookkeeping"] = "ok"
+    res["contractions"] = check_contractions(no, uo, vo, deg, grp, n)
     if labels_file:
         lab = np.load(labels_file).astype(np.int64)
         if len(lab) == n: lr = lab; src = "reduced"

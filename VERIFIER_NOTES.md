@@ -32,6 +32,12 @@ Files (laptop + VM `~/sdp2/tol5/brk/verify/`, logs/dumps in VM `runs/`):
 7. UB = (C0 + sum lam - sum mu + sum g + sum sdiag + price_asm + price_psd)/L in exact fractions, rounded up.
 8. `--orig DIR --labels LAB`: original graph -> reduced instance bookkeeping exact (vol = summed degrees, C0 = 2 #inside,
    weights = edge counts), and Q_orig(labels) == (C0 + <B', X'>)/L as exact fractions.
+9. `--orig DIR` (Oct 22 2026): eligibility of the contractions, recomputed from the original edge list rather than taken
+   from the reducer. Union-find over the edges inside groups joins a and b only if the pair is eligible: leaf rule
+   (deg_a == 1 or deg_b == 1) or twin rule (N[a] == N[b], compared on the sorted CSR rows, and deg^2 < 2m). Every group
+   must end up as one component. Both rules hold in every optimal partition, so the reduced optimum equals the original
+   one. Edges whose endpoints are already joined are skipped, so at most n_orig - n_reduced neighbourhood comparisons
+   are made.
 
 ## Validation
 * Brute force (laptop, `test_verify_bf.py` seeds 2/5/7: 73 instances; original graphs n0 <= 11 with leaves + true twins ->

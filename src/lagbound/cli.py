@@ -1,4 +1,4 @@
-"""Command line interface: ``lagbound GRAPH [options]``."""
+"""Command line interface: ``lagbound GRAPH [options]`` and ``lagbound score GRAPH PARTITION [options]``."""
 from __future__ import annotations
 
 import argparse
@@ -6,11 +6,44 @@ import json
 import sys
 
 from .api import bound
+from .score import CERTIFIED, read_partition, score
+
+
+def score_main(argv) -> int:
+    p = argparse.ArgumentParser(prog="lagbound score", description="Score a partition against a certified upper bound: "
+                                "modularity and the range of improvement any partition could still achieve over it.")
+    p.add_argument("graph", help="edge-list file: one 'u v' pair per line, '#' or '%%' comments, .gz allowed")
+    p.add_argument("partition", help="'node cluster' per line, as written by --partition-out")
+    p.add_argument("--network", choices=list(CERTIFIED), help="use the certified bounds of this network (the graph's "
+                   "node and edge counts are checked)")
+    p.add_argument("--upper", type=float, help="an upper bound on the maximum modularity of the graph")
+    p.add_argument("--lower", type=float, help="modularity of a better known partition, for the lower limit")
+    p.add_argument("--json", action="store_true", help="print the result as JSON")
+    a = p.parse_args(argv)
+    if a.network is None and a.upper is None:
+        p.error("give --network or --upper")
+    try:
+        s = score(a.graph, read_partition(a.partition), upper=a.upper, lower=a.lower, network=a.network)
+    except ValueError as err:
+        print(f"lagbound score: {err}", file=sys.stderr)
+        return 2
+    if a.json:
+        lo, hi = s.improvement
+        json.dump({"modularity": s.modularity, "exact": str(s.exact), "upper": s.upper, "lower": s.lower,
+                   "network": s.network, "absolute_gap": s.absolute_gap, "improvement_at_least": lo,
+                   "improvement_at_most": hi}, sys.stdout, indent=1)
+        print()
+    else:
+        print(s.summary())
+    return 0
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "score":
+        return score_main(argv[1:])
     p = argparse.ArgumentParser(prog="lagbound", description="Lower and certified upper bounds on the maximum "
-                                "modularity of a graph.")
+                                "modularity of a graph. 'lagbound score --help' scores a partition against a certified bound.")
     p.add_argument("graph", help="edge-list file: one 'u v' pair per line, '#' or '%%' comments, .gz allowed")
     which = p.add_mutually_exclusive_group()
     which.add_argument("--lower-only", action="store_true", help="only compute the lower bound (best partition)")
