@@ -32,14 +32,16 @@ RIGOR (no forming of R^T R, cost O(nnz(factor))):
   * superlu backend (no pivoting, asserted): Higham Thm 9.3: L U = Ms + dA, |dA| <= gamma(k+4) |L||U|; with D = diag U > 0
     (asserted), U^T D^{-1} U is PSD exactly and LU - U^T D^{-1} U = F U, F = L - U^T D^{-1} (computed with a 4u
     margin) -> price = gamma (|L|^T 1).(|U| 1) + (|F|^T 1).(|U| 1).
-  * all multipliers asserted >= 0; constants summed with math.fsum (correctly rounded) then rounded up; vector
-    price sums of nonnegative terms inflated by (1 + 4 nnz u).
+  * all multipliers asserted >= 0; vector price sums of nonnegative terms inflated by (1 + 4 nnz u).  The final
+    total is accumulated in exact rationals and rounded up once (Nov 14 2026; it was nested math.fsum + nextafter,
+    which can fall below the exact sum by ~2^-53 (|const| + |sum g|)).  mu / om rows are refused.
   UB = (C0 + sum lam - sum mu + sum g + sum shift*w + price_asm + price_round) / L, rounded up.
 Usage (from tol5/):  DATA_DIR=... python brk/certvc/certify_lifted_vc.py TAG CKPT.npz [--initV est_saveW.npz] [--mu 1e4]
   --symbolic_only 1 : build the lifted pattern, ND order, report fill / flops / memory and exit (no numerics).
   --vc_drop t       : drop VC multipliers < t (always valid; re-polish g with --polish_rgd).
 """
 import os, sys, time, json, math, argparse
+from fractions import Fraction
 HERE = os.path.dirname(os.path.abspath(__file__))
 os.environ.setdefault("NUMBA_CACHE_DIR", os.path.join(HERE, "numba_cache"))
 import numpy as np, scipy.sparse as sp, scipy.sparse.linalg as sla
@@ -49,6 +51,27 @@ U_ = 2.0**-53
 def gam(k): k = np.asarray(k, dtype=np.float64); return k*U_/(1.0 - k*U_)
 def up(x): return float(np.nextafter(float(x), np.inf))
 def fsum_up(a): return up(math.fsum(np.asarray(a, dtype=np.float64).ravel().tolist())) if np.size(a) else 0.0
+def exact_sum(a):
+    """exact rational sum of a float64 array (Nov 14 2026: the final bound is accumulated exactly, as in the verifier;
+    nested correctly rounded sums followed by one upward rounding do not bound the exact sum)."""
+    a = np.asarray(a, np.float64).ravel(); a = a[a != 0]
+    if len(a) == 0: return Fraction(0)
+    assert np.isfinite(a).all(), "non-finite value in a summed vector"
+    m, e = np.frexp(a); mi = (m*2.0**53).astype(np.int64); e = e.astype(np.int64) - 53
+    o = np.argsort(e, kind="stable"); e = e[o]; mi = mi[o]; cut = np.flatnonzero(np.diff(e)) + 1
+    tot = Fraction(0)
+    for es, ms in zip(np.split(e, cut), np.split(mi, cut)):
+        tot += Fraction(sum(ms.tolist()))*(Fraction(2)**int(es[0]))
+    return tot
+def frac_up(x):
+    f = float(x)
+    return f if Fraction(f) >= x else float(np.nextafter(f, np.inf))
+def certified_total(C0, lam, mu, g, sdiag, p_asm, p_round, L):
+    """UB = (C0 + sum lam - sum mu + sum g + sum sdiag + p_asm + p_round) / L, exact, rounded up (p_asm, p_round are
+    already upward-evaluated allowances)."""
+    tot = (Fraction(C0) + exact_sum(lam) - exact_sum(mu) + exact_sum(g) + exact_sum(sdiag)
+           + Fraction(float(p_asm)) + Fraction(float(p_round)))
+    return frac_up(tot/int(L)), tot
 T0 = time.time()
 def rss():
     import resource
@@ -471,6 +494,11 @@ def tri_fill_filter(P, opts):
 # ----------------------------------------------------------------------------- main certify routine
 def certify(P, opts):
     n, d, L = P["n"], P["d"], P["L"]; t0 = time.time()
+    # neighbour / connectivity rows (mu, om) hold only for OPTIMAL partitions under conditions that are not checked
+    # here; they are not certified (Oct 4 2026 audit, finding 2).  No reported run used them.
+    if (np.asarray(P["mu"]) > 0).any() or (np.asarray(P["om"]) > 0).any():
+        raise SystemExit("certificate refused: the checkpoint has neighbour / connectivity (mu / om) multipliers; "
+                         "rerun the solver without --nbr_cut / --extra_conn")
     if opts.get("tri_fill_filter") and len(P["lam"]):
         P = tri_fill_filter(P, opts); opts = dict(opts); opts["order_notri"] = 1     # same ordering -> no triangle fill
     op = Op(P); V = P["V"]
@@ -550,10 +578,8 @@ def certify(P, opts):
         if steps > int(opts.get("bisect", 0)) or hi - lo <= 2e-3*hi: break
         shift = 0.5*(lo + hi)
     shift, p_asm, hmax, p_round, info = best; sdiag = shift*w
-    p_shift = fsum_up(sdiag)
-    tot = math.fsum([const, math.fsum(gd.tolist()), p_shift, p_asm, p_round])
-    tot = up(tot)
-    ub = up(tot/L)
+    ub, tot = certified_total(P["C0"], P["lam"], P["mu"], gd, sdiag, p_asm, p_round, L)
+    p_shift = float(exact_sum(sdiag))
     res.update(UB=ub, shift=shift, lmin=lmin, price_shift=p_shift/L, price_asm=p_asm/L, price_round=p_round/L, hmax=hmax,
                backend=backend, factor=info, seconds=time.time()-t0, rss_MB=rss())
     log(f"CERTIFIED UB {ub:.6f}  (dv {dv:.6f} + shift {p_shift/L:.2e} + asm {p_asm/L:.2e} + round {p_round/L:.2e})")

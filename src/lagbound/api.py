@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from fractions import Fraction
@@ -124,6 +125,31 @@ def lower_bound(graph, seeds: int = 10, refine_time: float = 60.0, workdir: str 
                       seconds=time.time() - t0, workdir=workdir and ws.root)
 
 
+def _solved_by_reduction(ws: Workspace, labels: str, verify: bool, t0: float) -> UpperBound:
+    """The exact reductions left no edge between groups (for example, a complete graph collapses to one node). Merging
+    two groups then only adds -2 vol_P vol_Q / L < 0, so keeping every group separate is optimal and
+    Q* = (C0 - sum_P vol_P^2 / L) / L exactly: the bound is the optimum, rounded up, with no solver or certificate."""
+    rx = ws.path("data", TAG + "__rx")
+    with open(os.path.join(rx, "meta.json")) as fh:
+        meta = json.load(fh)
+    L = int(meta["L_orig"])
+    vol = np.load(os.path.join(rx, "vol.npy")).astype(np.int64)
+    q = Fraction(2 * int(meta["inside_edges"]), L) - Fraction(sum(int(x) ** 2 for x in vol), L * L)
+    value = float(q)
+    if Fraction(value) < q:
+        value = float(np.nextafter(value, np.inf))
+    ws.say(f"the reductions solve the instance: maximum modularity {value:.6f}")
+    details = dict(labels=labels, exact=str(q), solved_by_reduction=True)
+    status, stages = "certified", [("reductions", time.time() - t0)]
+    if verify:
+        res = ws.verify_reduction(labels)
+        details["verification"] = res
+        status = "verified" if res.get("passed") else "rejected"
+        stages.append(("verification", time.time() - t0))
+    return UpperBound(value=value, status=status, estimate=float(q), certificate=None, details=details,
+                      seconds=time.time() - t0, workdir=ws.root, stages=stages)
+
+
 def upper_bound(graph, time_limit: float = 3600.0, partition=None, lower: float | None = None,
                 levels: tuple = (16, 64), vc_level: float = 64, max_clusters: int = 6000,
                 proximal_fraction: float = 0.4, fill_filter: bool = False, certify: bool = True,
@@ -167,9 +193,15 @@ def upper_bound(graph, time_limit: float = 3600.0, partition=None, lower: float 
     pairs_r = [ws.reduced_labels(files[float(r)]) for r in levels]
     vc_r = ws.reduced_labels(files[float(vc_level)])
     with open(ws.path("data", TAG + "__rx", "graph.json")) as fh:
-        n_red = json.load(fh)["n"]
+        red = json.load(fh)
+    n_red = red["n"]
+    if red["m"] == 0:
+        return _solved_by_reduction(ws, init, verify, t0)
     lb_arg = lower if lower is not None else float("nan")
-    nbatch = 512 if n_red >= 512 * 64 else max(1, n_red // 64)
+    # Every batch's rows step in parallel from the same V, so a single batch is a Jacobi sweep. On small reduced
+    # instances that can lock antipodal rows (X_ij = -1) that flip together forever while the node-cluster
+    # multipliers grow without bound (seen on 15 of the 155 MaxSAT benchmark graphs); at least 8 batches avoids it.
+    nbatch = 512 if n_red >= 512 * 64 else min(n_red, max(8, n_red // 64))
     ws.say(f"reduced instance: {n_red} nodes; solver batches {nbatch}")
 
     solver = dict(lb=lb_arg, outer=max_iterations, nbatch=nbatch, max_clusters=max_clusters)

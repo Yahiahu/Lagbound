@@ -64,3 +64,19 @@ def test_failed_verification_is_not_reported_as_passed(tmp_path):
     assert ub.verify()["passed"]                       # leaves a passing verify.json behind
     ub.certificate = str(tmp_path / "missing.npz")
     assert not ub.verify()["passed"]
+
+
+@pytest.mark.parametrize("graph, q_star", [(nx.complete_graph(12), 0.0),
+                                           (nx.disjoint_union(nx.complete_graph(5), nx.complete_graph(6)), 0.48)])
+def test_solved_by_reductions(graph, q_star):
+    # twin merges leave no edge between groups: the optimum is exact, with no solver run and no certificate
+    ub = upper_bound(graph, verify=True)
+    assert ub.status == "verified" and ub.certificate is None and ub.details["solved_by_reduction"]
+    assert q_star <= ub.value <= q_star + 1e-15
+
+
+def test_small_reduced_instance_converges():
+    # Les Miserables reduces to 46 nodes; as a single (Jacobi) batch its rows locked antipodal and the bound diverged
+    # (U = 25 on the MaxSAT benchmark). Optimum 72259/129032 (Ansotegui et al., ICCS 2025).
+    ub = upper_bound(nx.les_miserables_graph(), time_limit=60, verify=True)
+    assert ub.status == "verified" and 72259 / 129032 <= ub.value < 0.58

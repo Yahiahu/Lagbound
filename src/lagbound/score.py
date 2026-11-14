@@ -8,7 +8,8 @@ improves on it by more than ``(U - Q) / Q``. A known better partition with modul
     [max(0, L - Q) / Q,  (U - Q) / Q].
 
 ``CERTIFIED`` holds the bounds of the networks in the paper; scoring against one of them checks the node and edge
-counts of the graph first, so a bound is never applied to a different graph.
+counts of the graph first. Counts do not establish graph identity: the caller must ensure the input is the same
+preprocessed graph used in the experiment.
 """
 from __future__ import annotations
 
@@ -74,7 +75,8 @@ def score(graph, partition, upper: float | None = None, lower: float | None = No
     """Score ``partition`` on ``graph`` against an upper bound.
 
     Give the bound as ``upper`` (and optionally the modularity ``lower`` of a better known partition), or name one of
-    the certified ``network``\\ s, whose bounds are used after checking the graph's node and edge counts. Explicit
+    the certified ``network``\\ s, whose bounds are used after a node/edge-count sanity check. The caller must
+    establish graph identity independently. Explicit
     ``upper`` / ``lower`` values take precedence over the network's.
     """
     g = as_graph(graph)

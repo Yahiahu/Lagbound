@@ -102,7 +102,8 @@ s.improvement                            # (at_least, at_most)
 `improvement` is the bracket `[max(0, L - Q) / Q, (U - Q) / Q]`, rounded outward: no partition improves on yours by
 more than the upper end, and a known partition already improves on it by the lower end (0 without `lower`). Both are
 `None` when `Q <= 0`. `lagbound.CERTIFIED` holds `L` and `U` for the eight networks above. With `network`, the graph's
-node and edge counts are checked against that network first, so a bound is never applied to a different graph.
+node and edge counts are checked first as a sanity check. The caller must establish that the input is the same
+preprocessed graph; matching counts alone do not establish graph identity.
 Explicit `upper` and `lower` take precedence over the network's values.
 
 On the command line, the partition is a file with one `node cluster` pair per line (the format `--partition-out`
@@ -163,6 +164,11 @@ when `L <= 0`), `partition`, and `summary()`.
 Only `"certified"` and `"verified"` values are proven bounds. A `"rejected"` value is the certifier's number after the
 verifier refused it; do not use it as a bound. An `"estimate"` is the solver's own number and can
 be slightly too low.
+
+When the exact reductions leave no edge between the merged groups (a complete graph, for example, collapses to one
+node), keeping every group separate is optimal, so the upper bound is the exact optimum. There is then no solver run
+and no certificate (`certificate` is `None`, `details["solved_by_reduction"]` is true). With `verify=True` the
+verifier's reduction check re-derives every merge from the original graph.
 
 ## How it works
 
@@ -253,19 +259,26 @@ src/lagbound/
   _core/         the research code that produced the results above
 ```
 
-`_core` is the research code. `PROVENANCE.md` lists each file's SHA-256, the research copy it was taken from, and
-every edit. The solver, operators, reductions, and verifier are unchanged. The edits are packaging only: input
-paths come from the working directory instead of fixed server paths (`hw_fix.py`, `lbutil.py`, `improve2.py`), and
-one array is cast to float in `est_dual_vcs.py` so integer inputs work on small graphs.
+`_core` is the research code. `PROVENANCE.md` records its research origins and subsequent changes.
+The 0.1.1 release includes the original-graph contraction-eligibility check, exact final scalar accumulation
+in the certifier, rejection of unsupported neighbour/connectivity rows, and an exact-rational acceptance check
+for the evaluation error of each verifier allowance. Factorization still uses floating-point arithmetic.
+Small-instance wrapper fixes handle instances solved completely by reduction and avoid a single parallel
+row batch on tiny reduced graphs. These wrapper changes do not change the batch counts of the eight large runs.
 
-The wrapper itself changes two things, both of which only take effect on small graphs:
+## Manuscript artifact and limitations
 
-- **Solver batches.** The solver uses 512 batches on large graphs, as in the runs above. On small graphs it uses
-  fewer, because 512 would leave most batches empty.
-- **Certificate shift search.** If the search reaches its 40-step limit, `pipeline.py` restarts it from the last
-  shift tried. This happens when the starting estimate is far too small, as it can be on tiny graphs.
+The [Atris manuscript artifact](https://github.com/Yahiahu/Lagbound/releases/tag/v0.1.1) includes saved partitions,
+experimental records, recovered replay evidence, resource tables, numerical audits, and checksums. It also includes
+a newly generated, independently verified karate-club certificate and a script to check it, plus a fresh validation
+of the archived Notre Dame partition against the public SNAP graph.
 
-Apart from those, run settings differ between graphs, as listed in the table above.
+The original eight large-network certificates and solver checkpoints are unavailable. Products retains a full replay
+JSON/log; the other networks have historical console excerpts and/or session notes. The archive distinguishes these
+records. They cannot substitute for the missing proof objects. Some per-run settings are incomplete, so regenerating
+certificates requires new search and certification and is not promised to reproduce the historical values exactly.
+A graph's node/edge counts alone do not establish graph identity: callers reusing a stored bound must ensure that
+the graph, preprocessing and node mapping match the experiment.
 
 ## Tests
 

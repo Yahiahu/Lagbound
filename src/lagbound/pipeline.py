@@ -228,5 +228,32 @@ class Workspace:
         res["passed"] = error is None and bool(res.get("passed"))
         return res
 
+    def verify_reduction(self, labels: str | None = None) -> dict:
+        """The verifier's exact reduction check alone (bookkeeping and eligibility of every contraction, recomputed
+        from the original graph), for instances the reductions solve completely, which have no certificate."""
+        out = os.path.join(self.runs, "verify.json")
+        code = ("import sys, json; sys.path.insert(0, {core!r}); import verify_cert as V\n"
+                "r = dict(passed=False)\n"
+                "try:\n"
+                "    inst = V.load_instance({rx!r}); r.update(V.check_reduction({orig!r}, {rx!r}, inst, {lab!r}))\n"
+                "    r.pop('Q_frac', None); r['passed'] = True\n"
+                "except V.Fail as e:\n"
+                "    r['fail'] = str(e)\n"
+                "json.dump(r, open({out!r}, 'w'), indent=1, default=float)\n").format(
+            core=CORE, rx=os.path.join(self.data, TAG + "__rx"), orig=os.path.join(self.data, TAG), lab=labels, out=out)
+        script = os.path.join(self.runs, "verify_reduction.py")
+        with open(script, "w") as fh:
+            fh.write(code)
+        if os.path.exists(out):
+            os.remove(out)
+        env = dict(os.environ)
+        env.setdefault("NUMBA_CACHE_DIR", os.path.join(os.path.expanduser("~"), ".cache", "lagbound", "numba"))
+        with open(os.path.join(self.runs, "verify.log"), "w") as fh:
+            subprocess.run([sys.executable, script], cwd=self.root, env=env, stdout=fh, stderr=subprocess.STDOUT)
+        if not os.path.exists(out):
+            return dict(passed=False, fail=f"the verifier wrote no result; see {os.path.join(self.runs, 'verify.log')}")
+        with open(out) as fh:
+            return json.load(fh)
+
     def cleanup(self):
         shutil.rmtree(self.root, ignore_errors=True)

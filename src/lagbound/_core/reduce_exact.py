@@ -45,7 +45,7 @@ json.dump({"n": int(N), "m": int(len(kk))}, open(Dz+"graph.json", "w")); np.save
 np.save(Dz+"weights.npy", w.astype(np.float64)); np.save(Dz+"vol.npy", vol); np.save(Dz+"group_of.npy", grp)
 json.dump({"L_orig": int(L), "leaf_edges": int(C0e), "inside_edges": int(C0e), "n_orig": int(n), "m_orig": int(m),
            "leaf_unions": nL, "twin_unions": nT}, open(Dz+"meta.json", "w"))
-print(f"{tag}: n {n} -> {N} (leaf edges {nL}, twin pairs {nT}), m {m} -> {len(kk)} weighted (max w {w.max()}), "
+print(f"{tag}: n {n} -> {N} (leaf edges {nL}, twin pairs {nT}), m {m} -> {len(kk)} weighted (max w {w.max() if len(w) else 0}), "
       f"inside edges {C0e}, C0/L {2*C0e/L:.6f}")
 for f in sys.argv[2:]:
     lab = np.load(f).astype(np.int64)

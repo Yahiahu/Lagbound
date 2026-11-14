@@ -68,3 +68,54 @@ def test_partial_contraction_passes(tmp_path):
     # merging only some eligible pairs is fine: a group that is a subset of an eligible component keeps the optimum
     res = check(tmp_path, GRAPH, [0, 1, 1, 2, 3, 4, 5, 6])
     assert res["contractions"]["twin_unions"] == 1 and res["contractions"]["leaf_unions"] == 0
+
+
+# ---------------------------------------------------------------------------------------------------- Nov 14 2026 audit
+def test_all_in_one_contraction_of_a_path_is_rejected(tmp_path):
+    # P4 merged into one node: the bookkeeping is consistent, but 1-2 is neither a leaf nor a twin pair, and the
+    # reduced optimum (0) is below the original one (1/6).  The public commit c92d74d accepted this.
+    with pytest.raises(vc.Fail, match="eligible"):
+        check(tmp_path, [(0, 1), (1, 2), (2, 3)], [0, 0, 0, 0])
+
+
+def test_contracting_non_adjacent_endpoints_of_two_edges_is_rejected(tmp_path):
+    # two disjoint edges, groups {0, 2} and {1, 3} (Oct 4 2026 audit, finding 1)
+    with pytest.raises(vc.Fail, match="eligible"):
+        check(tmp_path, [(0, 1), (2, 3)], [0, 1, 0, 1])
+
+
+def test_accept_price_dominates_its_evaluation_error():
+    from fractions import Fraction
+    charged, ev = vc.accept_price(0.15, 2.5e8, 1e-300)
+    assert Fraction(charged) >= Fraction(0.15)/(1 - vc.gam_frac(2.5e8)) and ev["margin"] > 9e-4
+    with pytest.raises(vc.Fail, match="evaluation error"):
+        vc.accept_price(0.15, 1e13, 0.0)              # gamma(1e13) > 1e-3: the 1.001 factor no longer covers it
+    with pytest.raises(vc.Fail, match="evaluation error"):
+        vc.accept_price(1e-310, 10, 1e-300)           # underflow loss larger than the allowance
+
+
+def test_certifier_final_sum_is_exact():
+    from fractions import Fraction
+    from lagbound._core.certify_lifted_vc import certified_total
+    # nested correctly rounded sums + one upward rounding fall below the exact value here (Codex review, Nov 14 2026)
+    g = np.array([-1e16, 1.0])
+    ub, tot = certified_total(1e16, np.zeros(0), np.zeros(0), g, np.zeros(1), 0.0, 0.0, 2)
+    assert tot == Fraction(1) and Fraction(ub) >= Fraction(1, 2)
+
+
+def test_neighbour_rows_are_refused(tmp_path):
+    import os
+    import networkx as nx
+    from lagbound import upper_bound
+    from lagbound.pipeline import TAG, Workspace
+    ub = upper_bound(nx.karate_club_graph(), time_limit=20, workdir=str(tmp_path / "w"))
+    inst = os.path.join(Workspace(None, ub.workdir).data, TAG + "__rx")
+    good = vc.verify(inst, ub.certificate, "ldl")
+    assert good["passed"] and good["psd"]["ldl"]["info"]["price_eval"]["margin"] > 0
+    assert good["assembly"]["price_eval"]["margin"] > 0
+    z = dict(np.load(ub.certificate))
+    mu = np.zeros(int(z["n"])); mu[0] = 0.25
+    z["mu"] = mu
+    bad = str(tmp_path / "with_mu.npz"); np.savez(bad, **z)
+    res = vc.verify(inst, bad, "ldl")
+    assert not res["passed"] and "mu / om" in res["fail"]

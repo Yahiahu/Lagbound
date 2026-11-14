@@ -18,7 +18,7 @@ CLAIM CHECKED.  For every partition X (X_ij = [i, j same community]) of the redu
     triangle (i,j,k), centre j:  lam (1 - X_ij - X_jk + X_ik) >= 0        (every partition)
     psi (i,j):  psi X_ij >= 0;   pair level:  sig_QR sum_{i in Q, j in R, i != j} d_i d_j X_ij >= 0;
     VC (i,R):   s_iR d_i sum_{j in R, j != i} d_j X_ij >= 0                (every partition)
-    mu_i (sum_j w_ij X_ij - 1) >= 0, om (X_is - X_ij) >= 0                  (OPTIMAL partitions only -> reported)
+    mu_i (sum_j w_ij X_ij - 1) >= 0, om (X_is - X_ij) >= 0                  (OPTIMAL partitions only -> REFUSED)
 LIFTED PROOF.  Lifted vectors x_k: x_i = v_i (vertices), x_p = s_p / vol_p for tree nodes, s_p = sum of children's s
   (s_i = d_i v_i).  The verifier recomputes every node's exact integer leaf vector S_p (s_p = sum_i S_pi v_i) and checks
   vol_p = sum_i S_pi (=> ||x_p|| <= 1), child coefficients, S_root = d, and S_node(R) = d * 1_R for every cluster R.
@@ -39,6 +39,9 @@ PSD PROOF (a different method from the certifier's CHOLMOD + a-priori Higham bou
                  price_psd = sum_k (sum_i sqrt(gamma(rc_i+3)) |l_ik|)^2 + underflow term (NOTES.md "Method sn").
   price_asm = sum_kl gamma(h_kl + 5) sum |terms_kl| (assembly rounding of fl(Mt)).  All sums of the bound are exact
   rationals (fractions) of the stored floats; UB is rounded up.
+  Evaluation of the allowances (Nov 14 2026, accept_price): each allowance is a floating-point expression; the verifier
+  bounds its evaluation error (gamma of the number of roundings, plus gradual underflow) and checks in exact rational
+  arithmetic that the charged value fl(1.001 * computed) dominates the allowance the proof needs; otherwise it refuses.
 Usage:
   python verify_cert.py INSTANCE_DIR CERT.npz [--method ldl|eig|sn|both|ldlsn|all] [--orig ORIG_DIR --labels LAB.npy] [--out R.json]
 """
@@ -76,6 +79,28 @@ def exact_sum(a):
 def frac_up(x):
     f = float(x)
     return f if Fraction(f) >= x else float(np.nextafter(f, np.inf))
+
+
+def gam_frac(k):
+    """gamma(k) = k u / (1 - k u) as an exact fraction (u = 2^-53)."""
+    k = Fraction(int(math.ceil(k))); u = Fraction(1, 2**53)
+    need(k*u < Fraction(1, 2), "operation count too large for the gamma bound")
+    return k*u/(1 - k*u)
+
+
+def accept_price(R, k, e_abs, factor=1.001, extra=Fraction(0)):
+    """Evaluation-error acceptance check for an error allowance (Nov 14 2026).  The allowance needed by the proof is
+    P_req <= R / (1 - gamma(k)) + e_abs + extra, where R is what was actually computed (a float or an exact fraction of
+    computed floats), k bounds the number of roundings that can make R smaller than P_req (relative), and e_abs bounds
+    the absolute loss from gradual underflow while R was evaluated.  The allowance charged is fl(factor * fl(R + extra)).
+    The inequality charged >= P_req is checked here in exact rational arithmetic; the verifier refuses otherwise.
+    Returns (charged float, record)."""
+    Rf = Fraction(R) if not isinstance(R, Fraction) else R
+    d = gam_frac(k)
+    req = Rf/(1 - d) + Fraction(e_abs) + Fraction(extra)
+    charged = float(float(Rf + Fraction(extra))*factor)
+    need(Fraction(charged) >= req, f"error allowance does not cover its own evaluation error (k {k:.3g}, e_abs {float(e_abs):.3g})")
+    return charged, dict(k=float(k), delta=float(d), e_abs=float(e_abs), margin=float(Fraction(charged)/req - 1) if req > 0 else float("inf"))
 
 
 # ============================================================================ 1. instance (from the files, from scratch)
@@ -246,9 +271,13 @@ def assemble(inst, c, vol):
     nterms = len(val); del r, cc, val
     need(np.array_equal(M.indptr, A.indptr) and np.array_equal(M.indices, A.indices) and np.array_equal(M.indices, H.indices), "pattern mismatch")
     # each term: <= 3 roundings; recursive sum of h terms: <= h-1 more;  gamma(h+5) covers both (+ the abs-sum rounding)
+    # provided (h+2)(h+5) <= 3/u, i.e. h <= 1.6e8 (checked).
+    hmax = float(H.data.max()); need(hmax <= 1.6e8, f"entry with {hmax:.3g} assembly terms: gamma(h+5) bound not justified")
     rowi = np.repeat(np.arange(N), np.diff(M.indptr)); mult = np.where(rowi == M.indices, 1.0, 2.0)
-    price = float(np.sum(mult*gam(H.data + 5.0)*A.data))*1.001
-    return M, price, dict(nterms=nterms, nnz_lower=int(M.nnz), hmax=float(H.data.max()))
+    R = float(np.sum(mult*gam(H.data + 5.0)*A.data))
+    # R: per entry <= 3 roundings (gamma: 2, product: 1; mult exact), any-order sum of nnz nonnegative terms: nnz - 1
+    price, ev = accept_price(R, M.nnz + 3, 4.0*M.nnz*2.0**-1074)
+    return M, price, dict(nterms=nterms, nnz_lower=int(M.nnz), hmax=hmax, price_eval=ev)
 
 
 def full_sym(Ml):
@@ -349,7 +378,10 @@ def psd_ldl(Ml, max_nnz=4e9):
     if st != 0:
         info.update(status=int(st), fail_at=int(kf), fail_frac=float(kf)/N); return False, None, info, None
     info.update(minD=float(D.min()), maxD=float(D.max()), poff=poff, pdiag=pdiag)
-    price = (2.0*poff + pdiag)*1.001
+    # evaluation of the running sums: each addend <= 4 roundings (gamma 2, product 1, add 1), sequential sums over
+    # nnzL (off-diagonal) and N (diagonal) addends, final 2 poff + pdiag 1 more; underflow <= 2^-1075 per product
+    price, ev = accept_price(2.0*poff + pdiag, nnzL + N + 8, (4.0*nnzL + 2.0*N)*2.0**-1074)
+    info["price_eval"] = ev
     return True, price, info, (perm, Lp, Li, Lx, D)
 
 
@@ -366,8 +398,8 @@ def psd_eig(Ml):
     l1 = float(lam[0])
     lb = (l1*(1 - nG) if l1 >= 0 else l1*(1 + nG)) - nE
     lb -= abs(lb)*1e-12 + 1e-300
-    price = N*max(0.0, -lb)*1.001
-    return True, price, dict(lam1=l1, normE=nE, normVtV_I=nG, lambda_lb=lb), None
+    price, ev = accept_price(N*max(0.0, -lb), 3, 0.0)                # one rounding in N * |lb|
+    return True, price, dict(lam1=l1, normE=nE, normVtV_I=nG, lambda_lb=lb, price_eval=ev), None
 
 
 # ============================================================================ 5c. PSD proof: supernodal Cholesky (BLAS-3), a-priori bound
@@ -762,9 +794,14 @@ def psd_sn(Ml, max_GB=120.0, W=256, nb=64, budget=2**27, relax=(4, 16, 48, 0.8, 
         info.update(status=4, nonfinite=int(nbad.sum()), min_diag=float(dmin.min())); return False, None, info, None
     rmax = float(amax.max()); hmax = float(rc.max())
     under = 2.0*(2.0*store)*(4.0*(2.0*hmax + 3.0) + 2.0*rmax)*2.0**-1022        # underflow / flush-to-zero (NOTES.md)
-    price_main = float(exact_sum(pr))
-    price = (price_main + under)*1.001
-    info.update(status=0, min_diag=float(dmin.min()), max_abs_L=rmax, price_main=price_main, price_under=under)
+    Rm = exact_sum(pr); price_main = float(Rm)
+    # evaluation of _sn_price (relative): sg <= 3 roundings, product 1, column sum <= nr - 1, square 1 -> 2 nr + 7;
+    # supernode sum <= W - 1 more.  Gradual underflow in products / squares: absolute, bounded below.  The underflow
+    # allowance itself is a short float product (<= 8 roundings).
+    nrmax = float(nrows.max()); Wmax = float(nc_s.max())
+    e_abs = (2.0*N*math.sqrt(1.01*price_main + 1.0)*nrmax + 2.0*N)*2.0**-1072
+    price, ev = accept_price(Rm, 2.0*nrmax + Wmax + 8.0, e_abs, extra=Fraction(under)*(1 + gam_frac(8)))
+    info.update(status=0, min_diag=float(dmin.min()), max_abs_L=rmax, price_main=price_main, price_under=under, price_eval=ev)
     return True, price, info, (perm, sfirst, sptr, sidx, nrows, off, X, rc, sg, store)
 
 
@@ -932,8 +969,12 @@ def verify(inst_dir, cert_file, method="ldl", orig=None, labels=None, id_check=T
         fam = dict(tri=int((c["lam"] > 0).sum()), psi=int((c["psi"] > 0).sum()), mu=int((c["mu"] > 0).sum()), om=int((c["om"] > 0).sum()),
                    pair_levels=[Lv["P"] for Lv in c["levels"]], vc_entries=[int((vc["sig"] > 0).sum()) for vc in c["vcs"]])
         out.update(n=inst["n"], N=c["N"], families=fam, cert_UB=c["cert_UB"])
-        out["validity"] = ("all constraint families are valid for EVERY partition" if fam["mu"] == 0 and fam["om"] == 0 else
-                           "uses mu/om (neighbour / connectivity) constraints: valid for OPTIMAL partitions only")
+        # mu/om rows (neighbour / connectivity cuts) hold only for OPTIMAL partitions and only under conditions this
+        # verifier does not check (separators, neighbour rows on the reduced instance); certificates using them are
+        # refused (Oct 4 2026 audit, finding 2).  No reported certificate uses them.
+        need(fam["mu"] == 0 and fam["om"] == 0, "certificate uses neighbour / connectivity (mu / om) multipliers, "
+             "whose validity is not checked; refused")
+        out["validity"] = "all constraint families are valid for EVERY partition"
         log(f"certificate N {c['N']} families {fam}")
         S, vol, depth = check_tree(inst, c); out["tree"] = dict(ok=True, fixed_point_iters=depth, nnzS=int(S.nnz))
         log(f"lifted tree OK (depth {depth - 1}, leaf-vector nnz {S.nnz})")
