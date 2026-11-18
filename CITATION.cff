@@ -2,6 +2,11 @@ cff-version: 1.2.0
 message: "If you use this software, please cite this repository."
 type: software
 title: "Atris"
+abstract: >-
+  Atris is an algorithm for large-scale modularity maximization with approximation
+  guarantees. It combines a feasible community partition with a strengthened
+  semidefinite relaxation and independent numerical verification to establish
+  how close the partition's modularity is to the global optimum.
 authors:
   - family-names: Hussein
     given-names: Yahia

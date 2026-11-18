@@ -1,4 +1,8 @@
-"""Public API: :func:`lower_bound`, :func:`upper_bound`, and :func:`bound` (both)."""
+"""Atris approximation workflow: find a partition, compute an upper bound, and assess solution quality.
+
+``bound`` combines partition search and bound computation. ``upper_bound`` also accepts an incumbent partition.
+An accepted upper bound U and exact partition score L > 0 give a guarantee within 100*(U-L)/U percent of optimal.
+"""
 from __future__ import annotations
 
 import json
@@ -58,19 +62,27 @@ class UpperBound:
 
 @dataclass
 class BoundResult:
+    """Partition and bounds used to assess proximity to optimal modularity.
+
+    Check ``upper.status`` before treating its value as a bound. The existing ``gap`` uses (U-L)/L,
+    whereas a guarantee within x percent of optimal uses x = 100*(U-L)/U for exact L > 0.
+    """
     lower: LowerBound | None
     upper: UpperBound | None
 
     @property
     def absolute_gap(self) -> float | None:
-        """``U - L``: no partition has modularity more than this above the lower bound's partition."""
+        """Floating-point ``U - L``. Interpretation as a gap requires an accepted upper bound."""
         if self.lower is None or self.upper is None:
             return None
         return self.upper.value - self.lower.value
 
     @property
     def gap(self) -> float | None:
-        """``(U - L) / L``, the relative version of :attr:`absolute_gap`; ``None`` unless ``L > 0``."""
+        """``(U - L) / L``, relative improvement over the partition, not (U-L)/U; ``None`` unless L > 0.
+
+        This is a floating-point display quantity and does not check the upper bound's status.
+        """
         if self.absolute_gap is None or self.lower.value <= 0:
             return None
         return self.absolute_gap / self.lower.value
@@ -104,7 +116,8 @@ def _verify_method(method: str, details: dict) -> str:
 def lower_bound(graph, seeds: int = 10, refine_time: float = 60.0, workdir: str | None = None,
                 verbose: bool = False) -> LowerBound:
     """Best partition found by Leiden (``seeds`` converged runs) followed by ensemble refinement for
-    ``refine_time`` seconds. The value is the exact modularity of the returned partition. Without ``workdir`` the
+    ``refine_time`` seconds. ``exact`` is the rational modularity of the returned partition and ``value`` its
+    floating-point conversion. Without ``workdir`` the
     temporary files are deleted afterwards."""
     t0 = time.time()
     g = as_graph(graph)
@@ -157,7 +170,11 @@ def upper_bound(graph, time_limit: float = 3600.0, partition=None, lower: float 
                 verify: bool = False, verify_method: str = "auto", verify_max_gb: float = 120.0,
                 threads: int | None = None, max_iterations: int = 3000, workdir: str | None = None,
                 verbose: bool = False) -> UpperBound:
-    """Upper bound on the maximum modularity of ``graph`` by the pipeline of the paper.
+    """Upper-bound component of the Atris approximation algorithm.
+
+    ``partition`` can supply an incumbent from any heuristic. Evaluate its modularity exactly with
+    ``modularity(graph, partition, exact=True)`` and combine that score with the accepted upper bound
+    to assess its proximity to optimality. Use ``verify=True`` for independent verification.
 
     1. Leiden clusterings at the resolutions in ``levels`` (cluster-pair rows, at most ``max_clusters`` clusters per
        level) and ``vc_level`` (node-cluster rows). Resolution 1 means the starting partition: ``partition`` if
@@ -254,7 +271,13 @@ def upper_bound(graph, time_limit: float = 3600.0, partition=None, lower: float 
 def bound(graph, lower: bool = True, upper: bool = True, time_limit: float = 3600.0, seeds: int = 10,
           refine_time: float = 60.0, certify: bool = True, verify: bool = False, workdir: str | None = None,
           verbose: bool = False, **upper_options) -> BoundResult:
-    """Lower bound, upper bound, or both (default). With both, the lower bound's partition initializes the solver."""
+    """Return a heuristic partition and an upper bound (both components by default).
+
+    The Leiden/ensemble partition supplies the lower bound and initializes the upper-bound search.
+    Use ``verify=True`` for independent verification, and inspect the returned status before reporting
+    a guarantee. For an external incumbent, call ``upper_bound(partition=...)`` and evaluate its
+    modularity separately. This wrapper does not implement target-based stopping or fallback after rejection.
+    """
     g = as_graph(graph)
     lb = lower_bound(g, seeds=seeds, refine_time=refine_time, workdir=workdir, verbose=verbose) if lower else None
     ub = None

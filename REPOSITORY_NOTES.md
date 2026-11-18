@@ -35,13 +35,48 @@ Their provenance needs to be reconciled with the corresponding graph, run, and v
 changing the stored lookup. This review does not establish which set should be used in the final manuscript.
 The other five displayed upper bounds agree.
 
-The README now labels its table as historical and uses `100 * (U - L) / U`, rounded upward to two decimal places,
-for its "within optimal" percentages. The public API's existing `gap` and `Score.improvement` use the partition
-score as denominator and retain their existing meaning. These quantities must not be interchanged.
+The README and `docs/RESULTS.md` now identify their tables as results reported in the current manuscript and
+disclose the unresolved differences. The historical table below preserves the archive and lookup values.
+Both use `100 * (U - L) / U`, rounded upward to two decimal places, for "within optimal" percentages. The public
+API's existing `gap` and `Score.improvement` use the partition score as denominator and retain their existing
+meaning. These quantities must not be interchanged.
 
 The original eight large-network certificate files and checkpoints are unavailable. The release contains
 surviving verification records, including a full ogbn-products replay JSON/log, but cannot independently replay
 the eight original proofs. Tests on small graphs do not establish the validity of those historical results.
+
+### Archived bounds used by the package
+
+These values reproduce `table1_bounds.csv` in the November 14, 2026 release archive and the `CERTIFIED` lookup.
+The partitions were obtained with VieClus. `L` is rounded downward and `U` upward.
+
+| Network | L | U | Within optimal (%) |
+|---|---:|---:|---:|
+| web-Stanford | 0.928191 | 0.946186 | 1.91 |
+| eu-2005 | 0.941574 | 0.960156 | 1.94 |
+| web-NotreDame | 0.945390 | 0.971975 | 2.74 |
+| ogbn-products | 0.883424 | 0.917365 | 3.70 |
+| Hollywood-2011 | 0.759931 | 0.792885 | 4.16 |
+| coPapersCiteseer | 0.922867 | 0.965637 | 4.43 |
+| Hollywood-2009 | 0.754784 | 0.790501 | 4.52 |
+| coPapersDBLP | 0.867665 | 0.912993 | 4.97 |
+
+## Alignment with the approximation algorithm
+
+The README, software description, citation abstract, and public API documentation present Atris as returning a
+partition together with an approximation guarantee. The upper-bound procedure supplies one component of that
+algorithm. The documentation describes incumbent partitions, exact lower-bound evaluation, the four upper-bound
+steps, independent verification, and reuse of an accepted bound for other partitions of the same graph.
+
+The documentation distinguishes the manuscript's algorithm from the current wrapper. The wrapper uses Leiden
+with ensemble refinement, while the large-network experiments use VieClus. External partitions are supplied
+through `upper_bound(partition=...)`, with exact evaluation of their modularity. `bound()` does not accept an
+incumbent directly or automate target-based stopping and fallback after rejected verification. The usage example
+computes the manuscript's percentage from the exact partition score, rounds it upward, and checks verification
+status. The CLI retains its existing gap convention and explains it in the help text.
+
+This alignment changes documentation and descriptive metadata. It does not change solver behavior, stored
+experimental bounds, package or command names, or the contents of existing releases.
 
 ## Other corrections
 
@@ -72,5 +107,12 @@ in the graph tests, including ignored edge weights and removed self-loops.
 
 `CITATION.cff` passes the Citation File Format 1.2.0 schema. The wheel builds successfully and contains the
 correct author names, license attribution, version, and repository links. All recorded core-file SHA-256
-prefixes match the current source. The eight README rows match the archived CSV, and their percentages
+prefixes match the current source. The eight archived rows above match the release CSV, and their percentages
 were checked using decimal arithmetic with upward rounding.
+
+The approximation-documentation audit checked all eight manuscript result rows and all 11 heuristic comparison
+rows against the saved manuscript and comparison records. The incumbent and bound-reuse example passed independent
+verification on a small graph with a known optimum. Percentage calculations, relative documentation links, CLI
+help, citation metadata, and the package build passed their checks. A syntax-tree comparison confirmed that
+the Python changes only affect docstrings and help text. The audit also corrected descriptions of input warnings
+and search-budget allocation to match the implementation.

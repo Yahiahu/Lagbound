@@ -1,7 +1,11 @@
-"""Atris: certified bounds for modularity maximization (Python package ``lagbound``).
+"""Atris: large-scale modularity maximization with approximation guarantees (package ``lagbound``).
+
+A feasible partition and a verified upper bound establish proximity to optimal modularity.
+For exact partition score L > 0 and accepted bound U, the partition is within 100*(U-L)/U percent of optimal.
+The legacy ``gap`` field uses (U-L)/L instead. See the README for conservative percentage reporting.
 
 >>> import lagbound
->>> res = lagbound.bound("graph.txt")              # lower and upper bound
+>>> res = lagbound.bound("graph.txt", verify=True) # partition and independently verified upper bound
 >>> lb = lagbound.lower_bound(G)                   # best partition found
 >>> ub = lagbound.upper_bound(G, verify=True)      # certified and independently verified upper bound
 >>> s = lagbound.score(G, partition, upper=0.42)   # how much any partition could improve on this one

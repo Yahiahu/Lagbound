@@ -14,8 +14,8 @@ def score_main(argv) -> int:
                                 "modularity and the range of improvement any partition could still achieve over it.")
     p.add_argument("graph", help="edge-list file: one 'u v' pair per line, '#' or '%%' comments, .gz allowed")
     p.add_argument("partition", help="'node cluster' per line, as written by --partition-out")
-    p.add_argument("--network", choices=list(CERTIFIED), help="use the certified bounds of this network (the graph's "
-                   "node and edge counts are checked)")
+    p.add_argument("--network", choices=list(CERTIFIED), help="use this network's historical stored bounds "
+                   "(node and edge counts are checked, but graph identity must be established separately)")
     p.add_argument("--upper", type=float, help="an upper bound on the maximum modularity of the graph")
     p.add_argument("--lower", type=float, help="modularity of a better known partition, for the lower limit")
     p.add_argument("--json", action="store_true", help="print the result as JSON")
@@ -42,8 +42,10 @@ def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if argv and argv[0] == "score":
         return score_main(argv[1:])
-    p = argparse.ArgumentParser(prog="lagbound", description="Lower and certified upper bounds on the maximum "
-                                "modularity of a graph. 'lagbound score --help' scores a partition against a certified bound.")
+    p = argparse.ArgumentParser(prog="lagbound", description="Atris modularity approximation: find a partition "
+                                "and certify its quality using an upper bound. Add --verify for independent "
+                                "verification. The displayed relative gap is (U-L)/L; the percentage shortfall "
+                                "from optimality uses 100*(U-L)/U. See 'lagbound score --help' to assess another partition.")
     p.add_argument("graph", help="edge-list file: one 'u v' pair per line, '#' or '%%' comments, .gz allowed")
     which = p.add_mutually_exclusive_group()
     which.add_argument("--lower-only", action="store_true", help="only compute the lower bound (best partition)")

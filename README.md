@@ -1,45 +1,104 @@
 # Atris
 
+**Large-scale modularity maximization with approximation guarantees**
+
 **Authors** — Yahia Hussein and Samin Aref.
 
-Atris computes upper bounds on maximum modularity to assess the quality of graph partitions.
+Atris returns a community partition together with a guarantee of how close its modularity is to the global optimum.
+It combines a heuristic or user-supplied partition with a strengthened semidefinite relaxation and independent
+numerical verification. The partition supplies a feasible solution, and the verified upper bound limits how much
+better any partition could be.
+
+The current manuscript reports partitions **within 1.85–4.97% of optimal modularity** on eight networks with
+0.28–2.4 million nodes and 1.1–114.5 million edges. These results combine high-modularity partitions, guarantees
+unavailable from heuristic scores alone, and demonstrated scalability to networks with millions of nodes.
+[Reported results](#reported-results) identifies the manuscript values and the outstanding differences from the
+archived records.
+
 The Python package and command remain named `lagbound` for compatibility.
 
-Community detection tools such as Louvain and Leiden return a partition and its modularity, but not how much
-better a partition could be. Atris computes both sides:
+## The approximation guarantee
 
-- a **lower bound** `L`: the modularity of the best partition it finds (exact, as a fraction);
-- an **upper bound** `U`: a value that no partition of the graph can exceed, backed by a certificate that a
-  separate verifier re-checks in outward-rounded arithmetic.
+Let `Q*` be the maximum modularity of the input graph. Atris combines:
 
-For an accepted bound, the true maximum lies in `[L, U]`. When `L > 0`, the partition is within
-`100 * (U - L) / U` percent of optimal modularity. The API's `gap` instead reports `(U - L) / L`,
-which bounds the relative improvement over the returned partition. These percentages use different denominators.
-Putting all nodes in one community gives modularity zero, so the maximum is never negative.
+- a feasible partition `P`, with exact modularity `L = Q(P)` or a conservative lower bound on that score;
+- a verified upper bound `U`, which no valid partition of the graph can exceed.
 
-## Historical results from v0.1.1
+Together, these establish `L <= Q* <= U`. For `L > 0`, the returned partition is **within x% of optimal**, where
 
-The following values reproduce `table1_bounds.csv` in the November 14, 2026 release archive.
-Three upper bounds differ from the current manuscript. See [the reconciliation notes](REPOSITORY_NOTES.md)
-before using this table as a manuscript reference.
+```text
+x = 100 * (U - L) / U
+```
 
-| Network | nodes | edges | L | U | Within optimal (%) |
-|---|---:|---:|---:|---:|---:|
-| web-Stanford | 282K | 2.0M | 0.928191 | 0.946186 | 1.91 |
-| eu-2005 | 863K | 16.1M | 0.941574 | 0.960156 | 1.94 |
-| web-NotreDame | 326K | 1.1M | 0.945390 | 0.971975 | 2.74 |
-| ogbn-products | 2.40M | 61.9M | 0.883424 | 0.917365 | 3.70 |
-| Hollywood-2011 | 1.99M | 114.5M | 0.759931 | 0.792885 | 4.16 |
-| coPapersCiteseer | 434K | 16.0M | 0.922867 | 0.965637 | 4.43 |
-| Hollywood-2009 | 1.11M | 56.4M | 0.754784 | 0.790501 | 4.52 |
-| coPapersDBLP | 540K | 15.2M | 0.867665 | 0.912993 | 4.97 |
+This means `Q(P) >= (1 - x/100) * Q*`. For example, `L = 0.90` and `U = 0.93` establish that the partition is
+within 3.23% of optimal, rounding the percentage upward. A smaller percentage is a tighter guarantee.
 
-`L` is the modularity of a partition found by VieClus, rounded down (the library's own `lower_bound` uses Leiden);
-`U` is the reported independent replay bound, rounded up. Percentages use `100 * (U - L) / U`, rounded upward
-to two decimal places. The surviving records report independent verification of these historical runs.
-The original large-network certificates are unavailable, so this release cannot replay them. The archive contains
-a full ogbn-products replay JSON/log and excerpts or research notes for the other networks.
-The ogbn-products replay took 13.1 h and peaked at about 481 GiB.
+The guarantee is computed for the particular graph and partition. Atris does not promise the same percentage on
+every graph or that any requested tolerance will be reached. The relaxation can remain above the true optimum
+even after full optimization. For `L = 0`, this formula provides no nontrivial relative guarantee. Proximity to
+optimal modularity also does not establish that the communities are unique or correct for a particular application.
+
+## The algorithm
+
+Algorithm 1 in the manuscript starts with the all-in-one partition, `L = 0`, and the universal bound `U = 1`.
+It accepts an optional incumbent partition, optionally runs a partition heuristic, and retains the best exactly
+evaluated candidate. A stronger partition raises `L` and improves the guarantee.
+
+Atris then tightens `U` through four steps:
+
+1. **Reduce the graph.** Remove isolated nodes and contract eligible leaves and true twins without changing
+   the maximum modularity.
+2. **Optimize a strengthened relaxation.** Combine positive semidefiniteness, selected triangle inequalities,
+   and aggregate nonnegativity constraints. A Lagrangian method searches over a low-dimensional node embedding
+   to make this computation practical on large graphs.
+3. **Construct a candidate bound.** Use the optimized constraint multipliers and diagonal values to obtain
+   an upper-bound estimate.
+4. **Verify and correct the bound.** A fixed low rank can exclude valid partitions, so the search estimate alone
+   does not establish an upper bound for every partition. Atris checks a matrix inequality and raises the candidate
+   value as needed, accounting for numerical errors. Auxiliary variables express the dense terms sparsely so that
+   verification can use a sparse factorization.
+
+The algorithm keeps each improvement in the verified upper bound and stops when the requested percentage is reached
+or the computational budget is exhausted. An unsuccessful verification leaves the previously accepted bound intact.
+The output is the retained partition, `L`, `U`, the percentage when `L > 0`, and whether a supplied target was met.
+Validity of an accepted bound does not require the low-rank search to reach a global optimum.
+
+The current Python wrapper exposes partition search, bound computation, and verification. Its combined `bound()`
+call uses Leiden with ensemble refinement. The manuscript's large-network experiments use VieClus partitions,
+which can be supplied through the [incumbent workflow](#using-an-incumbent-partition). The wrapper does not yet
+automate Algorithm 1's target-based stopping loop or its fallback to the previously accepted bound after rejection.
+Inspect the returned status before reporting a guarantee.
+
+## Reported results
+
+The manuscript selects VieClus after comparing 11 heuristic configurations on 100 networks. VieClus returned a
+partition on every network and achieved the highest modularity, or tied for it, among the available results on all
+100. On the 60 reference instances, it matched the known optima within `1e-9`. The [full comparison](docs/RESULTS.md#selecting-the-lower-bound-heuristic)
+records coverage, optimum matches, and best-or-tied counts under the stated budgets. VieClus is an external
+heuristic and is not bundled with this Python package.
+
+The eight large-network results reported in the current manuscript are:
+
+| Network | Nodes (millions) | Edges (millions) | Within optimal (%) |
+|---|---:|---:|---:|
+| web-Stanford | 0.282 | 1.993 | 1.95 |
+| eu-2005 | 0.863 | 16.138 | 1.85 |
+| web-NotreDame | 0.326 | 1.090 | 2.85 |
+| ogbn-products | 2.401 | 61.859 | 3.70 |
+| Hollywood-2011 | 1.985 | 114.493 | 4.16 |
+| coPapersCiteseer | 0.434 | 16.037 | 4.43 |
+| Hollywood-2009 | 1.107 | 56.376 | 4.52 |
+| coPapersDBLP | 0.540 | 15.246 | 4.97 |
+
+The manuscript reports a tighter guarantee on every network than the tested triangle-only Lagrangian baseline,
+whose percentages range from 3.58% to 22.61%, using the same feasible partitions. See the [full results](docs/RESULTS.md#approximation-guarantees-on-large-networks)
+for `L`, `U`, and the per-network comparison.
+
+**Record reconciliation remains open.** The upper bounds for web-Stanford, eu-2005, and web-NotreDame differ from
+the v0.1.1 archive and the package's stored lookup. Their manuscript values have not been located in the surviving
+release records. The [repository notes](REPOSITORY_NOTES.md#historical-results-and-the-current-manuscript) preserve
+both sets of values. The original eight large-network certificates are unavailable, so the release cannot replay
+those proofs. These reported results should be read with the [available evidence and limitations](#research-files-and-limitations).
 
 ## Install
 
@@ -47,13 +106,13 @@ The ogbn-products replay took 13.1 h and peaked at about 481 GiB.
 pip install "lagbound[networkx] @ git+https://github.com/Yahiahu/atris.git"
 ```
 
-or from a clone:
+Or from a clone:
 
 ```bash
-pip install -e .
+pip install -e ".[networkx]"
 ```
 
-Requires Python 3.10+, NumPy, SciPy, Numba, python-igraph, and PyMetis. The installation command above also includes
+Requires Python 3.10+, NumPy, SciPy, Numba, python-igraph, and PyMetis. These installation commands also include
 NetworkX for the examples. Linux and macOS are supported. The first run compiles the Numba kernels, which adds
 startup time. Later runs use the cache in `~/.cache/lagbound/numba`.
 
@@ -62,166 +121,190 @@ SuperLU. On large graphs this is required in practice.
 
 ## Usage
 
-### Python
+### Return a partition and its guarantee
 
 ```python
+from fractions import Fraction
+from math import ceil
+
 import networkx as nx
 import lagbound
 
+
+def within_percent(lower_exact, upper_result):
+    """Conservative percentage, after independent verification and for L > 0."""
+    if upper_result.status != "verified" or lower_exact <= 0:
+        return None
+    U = Fraction(upper_result.value)
+    if U < lower_exact:
+        raise ValueError("The upper bound is below the partition's exact modularity")
+    return ceil(10000 * (U - lower_exact) / U) / 100
+
+
 G = nx.karate_club_graph()
+res = lagbound.bound(G, time_limit=60, verify=True, workdir="karate-run")
 
-res = lagbound.bound(G, time_limit=60, verify=True)
-print(res.summary())
-# Example output format; the upper bound and runtime depend on the run.
-# lower bound  0.419790  (best partition found)
-# upper bound  0.420290  (verified)
-# gap          0.000500  (0.12%)
-
-res.partition                            # {node: cluster} for the best partition
-res.lower.exact                          # Fraction(1277, 3042)
-res.upper.certificate                    # path of the stored certificate
+print(res.partition)  # {node: community} for the returned partition
+x = within_percent(res.lower.exact, res.upper)
+if x is not None:
+    print(f"Within {x:.2f}% of optimal modularity")
+else:
+    print(f"No verified relative guarantee reported (status={res.upper.status})")
 ```
 
-Only one side:
+The example computes the percentage from the exact rational partition score and rounds upward to two decimal
+places. The floating-point `res.lower.value` and the formatted `summary()` are useful for display, but do not
+replace `res.lower.exact` in this calculation. The `time_limit` covers the upper-bound search. Partition search,
+bound estimation, certification, and verification require additional time.
+
+`res.upper.certificate` gives the certificate path. `verify=True` requests the independent verification used in
+the example. Without it, the default is certification without that separate re-check.
+
+### Using an incumbent partition
+
+Supply a partition obtained from VieClus, another heuristic, or an earlier run as a `{node: community}` mapping.
+Using `G` and `within_percent` from the example above:
 
 ```python
-lb = lagbound.lower_bound(G)                         # best partition, no upper bound
-ub = lagbound.upper_bound(G, time_limit=600)         # upper bound only
-ub = lagbound.upper_bound(G, verify=True)            # certified, then re-checked by the verifier
-ub = lagbound.upper_bound(G, certify=False)          # estimate only (faster, not a proof)
-ub = lagbound.upper_bound(G, partition=my_labels)    # start the solver from your own partition
+# my_partition is a mapping that covers the nodes of G.
+L = lagbound.modularity(G, my_partition, exact=True)
+ub = lagbound.upper_bound(
+    G, partition=my_partition, lower=float(L),
+    time_limit=600, verify=True, workdir="incumbent-run",
+)
+x = within_percent(L, ub)
+if x is not None:
+    print(f"The supplied partition is within {x:.2f}% of optimal modularity")
+else:
+    print(f"No verified relative guarantee reported (status={ub.status})")
 ```
 
-`upper_bound` without a partition starts from its own Leiden run, so it does not need the lower bound.
-`bound` runs both and passes the lower bound's partition to the solver, which is what the production runs did.
+`upper_bound(partition=...)` uses the supplied partition to initialize the bound search. The partition remains the
+feasible solution being assessed. The `lower` argument only affects progress logs. The current `bound()` wrapper
+does not accept an incumbent directly, so use this workflow when supplying one.
 
-`lagbound.modularity(G, partition, exact=True)` evaluates any partition exactly.
+### Reusing the upper bound
 
-### Scoring a partition
-
-A certified bound belongs to the graph, not to the partition that came with it, so any other partition of the same
-graph can be scored against it without running the solver:
+Once verified, `U` applies to every partition of the same graph. A better partition tightens the guarantee without
+repeating the upper-bound computation:
 
 ```python
-s = lagbound.score(G, my_partition, upper=0.420290)            # your own bound U
-s = lagbound.score(G, my_partition, network="coPapersDBLP")    # a bound from the table above
+new_L = lagbound.modularity(G, improved_partition, exact=True)
+new_x = within_percent(new_L, ub)
+if new_x is not None:
+    print(f"The new partition is within {new_x:.2f}% of optimal modularity")
+```
+
+The graph, preprocessing, and node mapping must match those used to compute `ub`.
+
+The separate `score()` API reports possible improvement over a partition:
+
+```python
+if ub.status != "verified":
+    raise ValueError("Independent verification is required before using this value")
+s = lagbound.score(G, improved_partition, upper=ub.value)
 print(s.summary())
-s.modularity, s.exact                    # Q, float and Fraction
-s.improvement                            # (at_least, at_most)
 ```
 
-`improvement` is the bracket `[max(0, L - Q) / Q, (U - Q) / Q]`, rounded outward: no partition improves on yours by
-more than the upper end, and a known partition already improves on it by the lower end (0 without `lower`). Both are
-`None` when `Q <= 0`. `lagbound.CERTIFIED` holds the historical v0.1.1 `L` and `U` values for the eight networks above.
-It is a stored lookup, not a new verification of the input graph. With `network`, the graph's
-node and edge counts are checked first as a sanity check. The caller must establish that the input is the same
-preprocessed graph; matching counts alone do not establish graph identity.
-Explicit `upper` and `lower` take precedence over the network's values.
+Use this only after accepting `ub` as a bound. `score()` trusts the supplied value and does not verify a certificate.
+Its `improvement` is `[max(0, L - Q) / Q, (U - Q) / Q]`, rounded outward, where `Q` is the supplied partition's score
+and `L` is an optional better known score. Both entries are `None` when `Q <= 0`.
 
-On the command line, the partition is a file with one `node cluster` pair per line (the format `--partition-out`
-writes):
-
-```bash
-lagbound score graph.txt part.txt --network coPapersDBLP
-lagbound score graph.txt part.txt --upper 0.912993 --lower 0.867665 --json
-```
+`lagbound.CERTIFIED` holds the [historical v0.1.1 lookup](REPOSITORY_NOTES.md#archived-bounds-used-by-the-package).
+Calling `score(..., network="coPapersDBLP")` checks node and edge counts before using that stored bound. Counts alone
+do not establish graph identity, and this lookup is not a new verification. Explicit `upper` and `lower` values
+take precedence over the stored values.
 
 ### Graph input
 
-Any of: a NetworkX or igraph graph, a SciPy sparse or dense NumPy adjacency matrix, an `(m, 2)` array of edges,
+Input can be a NetworkX or igraph graph, a SciPy sparse or dense NumPy adjacency matrix, an `(m, 2)` array of edges,
 or the path to an edge-list file (`u v` per line, `#` and `%` comments, `.gz` allowed). Node names can be any
-hashable values. Modularity is computed on the simple, undirected, unweighted graph: directions and weights are
-dropped, and self-loops and duplicate edges removed, with a warning when that changes the input. The bounds are
-for that graph, not for a weighted or directed version. Isolated nodes cannot change modularity; they are set aside and returned as
-singleton clusters.
+hashable values. Modularity is computed on the simple, undirected, unweighted graph. Directions and weights are
+dropped, and self-loops and duplicate edges removed. The loader warns about several input changes, including
+ignored weights and directions. The guarantee applies to the normalized graph. Isolated nodes cannot change
+modularity and are returned as singleton clusters.
 
 ### Command line
 
 ```bash
-lagbound graph.txt                                   # both bounds
-lagbound graph.txt --lower-only --partition-out part.txt
-lagbound graph.txt --upper-only --time-limit 7200 --verify --workdir run1
-lagbound graph.txt --json
-lagbound score graph.txt part.txt --network web-Stanford   # score a partition against a certified bound
-lagbound score graph.txt part.txt --upper 0.42 --lower 0.41
+# Return a partition, compute an upper bound, and verify it independently.
+lagbound graph.txt --verify --partition-out partition.txt --workdir run1
+
+# Run either component separately.
+lagbound graph.txt --lower-only --partition-out partition.txt
+lagbound graph.txt --upper-only --time-limit 7200 --verify --workdir bound-run
+
+# Inspect structured results or assess a partition against an existing bound.
+lagbound graph.txt --verify --json
+lagbound score graph.txt partition.txt --upper 0.912993 --lower 0.867665 --json
 ```
 
-`lagbound --help` lists all options.
+The last command assumes those bounds have already been established for `graph.txt`. A partition file contains
+one `node cluster` pair per line. `lagbound --help` lists the available options.
 
-## Results
+The existing CLI and `BoundResult.gap` report `(U - L) / L`, the possible relative improvement over the returned
+partition. The manuscript's **within x% of optimal** uses `100 * (U - L) / U`. The two denominators differ.
+The Python example above computes the manuscript's percentage. Neither a displayed gap nor a successful process
+exit substitutes for checking the bound's status.
 
-`lower_bound` returns a `LowerBound`:
+## API results and verification status
 
-| field | meaning |
+`bound()` returns a `BoundResult` containing `partition`, `lower`, `upper`, `absolute_gap`, `gap`, and `summary()`.
+Its default runs both components. `lower=False` or `upper=False` selects just one.
+
+| Result | Field | Meaning |
+|---|---|---|
+| `LowerBound` | `partition` | `{node: community}` for every original node |
+| | `exact`, `value` | partition modularity as a `Fraction` and as a float |
+| | `membership` | communities of non-isolated nodes, in `as_graph(G).labels` order |
+| `UpperBound` | `value`, `status` | candidate or accepted value, with the status below |
+| | `estimate` | search estimate before certification |
+| | `certificate` | stored certificate path (`.npz`), when a certificate is needed |
+| | `details`, `workdir` | stage summaries, checkpoints, and logs |
+| | `verify()` | run the independent verifier and return its report |
+| `BoundResult` | `absolute_gap` | floating-point `U - L` |
+| | `gap` | floating-point `(U - L) / L`, or `None` for `L <= 0` |
+
+| `upper.status` | Meaning |
 |---|---|
-| `value`, `exact` | modularity of the partition, float and `Fraction` |
-| `membership` | cluster of each non-isolated node, in the order of `as_graph(G).labels` |
-| `partition` | `{node: cluster}` over all nodes |
+| `"verified"` | certification succeeded and the independent verifier accepted the result |
+| `"certified"` | certification succeeded without the independent re-check |
+| `"rejected"` | the independent verifier refused the result, so do not use the value as a bound |
+| `"estimate"` | an unverified search estimate, obtained with `certify=False`, with no upper-bound guarantee |
 
-`upper_bound` returns an `UpperBound`:
+`UpperBound.verify()` returns a verification report. It does not update the object's `status` or `value`.
+For the complete checked result, use `verify=True` in the original `bound()` or `upper_bound()` call.
 
-| field | meaning |
-|---|---|
-| `value` | the upper bound |
-| `status` | `"verified"`, `"certified"`, `"rejected"` (verification was requested and failed), or `"estimate"` |
-| `estimate` | the solver's bound estimate before certification |
-| `certificate` | path of the certificate file (`.npz`) |
-| `details` | estimates, certificate and verification summaries |
-| `workdir` | directory with checkpoints and logs of every stage |
-| `verify()` | runs the independent verifier on the certificate |
+Some instances are solved entirely by the exact reductions. If no edge remains between merged groups, keeping
+them separate is optimal. The returned upper bound then rounds that optimum upward, with no solver run or stored
+certificate (`certificate=None`, `details["solved_by_reduction"]=True`). With `verify=True`, the reduction checker
+re-derives the merges from the original graph.
 
-`bound` returns a `BoundResult` with `lower`, `upper`, `absolute_gap` (`U - L`), `gap` (`(U - L) / L`, or `None`
-when `L <= 0`), `partition`, and `summary()`.
+## Implementation details
 
-Only `"certified"` and `"verified"` values are proven bounds. A `"rejected"` value is the certifier's number after the
-verifier refused it; do not use it as a bound. An `"estimate"` is the solver's own number and can
-be slightly too low.
+The lower-bound component runs Leiden with several seeds, then refines an ensemble by contracting nodes on whose
+community assignment good partitions agree and re-running Leiden.
 
-When the exact reductions leave no edge between the merged groups (a complete graph, for example, collapses to one
-node), keeping every group separate is optimal, so the upper bound is the exact optimum. There is then no solver run
-and no certificate (`certificate` is `None`, `details["solved_by_reduction"]` is true). With `verify=True` the
-verifier's reduction check re-derives every merge from the original graph.
+The upper-bound component constructs Leiden groupings at the requested resolutions for aggregate constraints,
+applies exact reductions, and runs the low-rank augmented Lagrangian search. A subsequent proximal phase keeps
+the triangle set fixed while updating multipliers. Checkpoint evaluation and rank refinement produce candidate
+bound parameters. Certification repairs the candidate and uses a sparse lifted matrix to check the required
+positive-semidefiniteness condition, with explicit allowances for numerical errors.
 
-## How it works
-
-Modularity maximization is a clique-partitioning problem over node pairs. Atris bounds it with a semidefinite
-relaxation strengthened by triangle inequalities and by constraints on clusters taken from Leiden partitions,
-solved by a low-rank augmented Lagrangian method. The low-rank search supplies candidate multipliers and a bound
-estimate. Certification corrects that estimate and checks the matrix condition needed for a valid upper bound.
-The stages are as follows.
-
-1. **Leiden levels.** Leiden partitions at two resolutions for the cluster-pair rows (`levels`, default 16 and
-   64) and one for the node-cluster rows (`vc_level`, default 64), plus the starting partition. They define the
-   cluster aggregates that carry most of the bound's strength.
-2. **Exact reductions.** Leaves and twin nodes are merged in ways that provably keep the optimum. On
-   Hollywood-2011 this halves the number of nodes.
-3. **Main phase.** The augmented Lagrangian solver adds violated triangles and cluster constraints, updates
-   multipliers, and checkpoints.
-4. **Proximal phase.** From the main phase's checkpoint, no new triangles are added and the multipliers are
-   updated with four inner sweeps each. Node-cluster separation stays on until its cap, as in the production runs.
-   This removes oscillation and lowers the bound further.
-5. **Bound estimate.** For the final checkpoints, the dual is evaluated with a refined factor and a rank-escape
-   step, and the better checkpoint is kept.
-6. **Certificate.** A repaired factor and a sparse lifted factorization prove the bound. Every rounding error is
-   priced into the bound with outward rounding, so the certified value is slightly above the estimate.
-7. **Verification** (optional). `verify_cert.py` reloads the certificate, checks that each constraint family is
-   valid for every partition, checks the exact reductions against the original graph, and re-proves positive
-   semidefiniteness with its own factorization. For the reductions it recomputes from the original edge list that
-   every contraction is eligible (a degree-one node and its neighbour, or adjacent nodes with identical closed
-   neighbourhoods and `deg^2 < 2m`), not only that the bookkeeping is consistent. See `VERIFIER_NOTES.md`.
-
-The lower bound comes from converged Leiden runs followed by an ensemble refinement that contracts the nodes all
-good partitions agree on and re-runs Leiden on the result.
+The independent verifier checks constraint validity, exact reduction eligibility, and the matrix condition using
+its own factorization. For contractions, it recomputes the required degree and neighborhood conditions from the
+original graph. See [VERIFIER_NOTES.md](VERIFIER_NOTES.md) for the numerical checks and accepted constraint families.
 
 ## Large graphs
 
-Time and memory grow with the graph. The numbers above took hours on 16 to 96 core machines with hundreds of GB of
-RAM, mostly for the certificate. Practical notes:
+Time and memory grow with the graph. The recorded large-network runs took hours on 16 to 96 core machines with
+hundreds of GB of RAM, mostly for certification and verification. Practical notes:
 
 - `time_limit` controls the main and proximal search budget. Bound estimation, certification, and independent
   verification add time beyond that budget, so it is not a limit on total wall-clock time.
-- Give the solver time: `time_limit` of several hours for graphs with tens of millions of edges. 60% goes to the
-  main phase and 40% to the proximal phase (`proximal_fraction`).
+- Give the solver time: `time_limit` of several hours for graphs with tens of millions of edges. With the default
+  `proximal_fraction=0.4`, the main phase is allocated 60% of that budget. The proximal phase uses the time remaining
+  after preparation and the main phase, so its actual allocation can be smaller than 40%.
 - Set `workdir` so checkpoints, certificates, and logs are kept; without it they go to a temporary directory.
 - `fill_filter=True` (`--fill-filter`) keeps only triangles compatible with the certificate's fill pattern before
   the proximal phase. Hollywood-2009, Hollywood-2011, and ogbn-products were certified this way; their
@@ -254,8 +337,9 @@ cluster levels and certificate settings:
 | web graphs, eu-2005 | not recorded | not recorded | proximal phase |
 
 "Not recorded" means the setting is not in the run notes kept with the code; the launch scripts for those runs
-stayed on the VM disks. Level 1 is the starting partition, which in these runs was the best Leiden partition (the lower bound's).
-The cluster counts per level are in the paper's appendix. These settings change the bound you get. The library
+stayed on the VM disks. Level 1 denotes the partition used to initialize the upper-bound search. The recorded
+searches used Leiden starts, while the manuscript evaluates the final guarantees against VieClus partitions.
+Additional experimental details are in the manuscript. These settings change the bound you get. The library
 does not reproduce two more parts of the runs. There, the bound was estimated every 50 iterations while the solver
 ran, and the main phase was stopped by hand once it plateaued. The proximal phase then resumed from a chosen
 checkpoint. `upper_bound` instead splits a fixed time budget and estimates the last checkpoint of each phase.
@@ -265,13 +349,13 @@ To repeat a run step by step, call the stages of `lagbound.pipeline.Workspace` d
 
 ```
 src/lagbound/
-  api.py         lower_bound, upper_bound, bound
+  api.py         partition search, upper bounds, and the combined approximation result
   pipeline.py    runs each stage of _core with the production flags
   graph.py       graph input
   modularity.py  exact modularity
   score.py       score a partition against a certified bound
   cli.py         command line
-  _core/         the research code that produced the results above
+  _core/         research optimization and certification routines
 ```
 
 `_core` is the research code. `PROVENANCE.md` records its research origins and subsequent changes.
