@@ -477,7 +477,11 @@ def quadA(indptr, indices, data, V):
 def level_aug(H, sig, rq, w, rho, pp, nesplit, EAs):
     """Canonical augmented() level term: h = sym(H) (- EAs with --ne_split), rr = rho r (r = rq rq^T * w),
     pp = max(0, sig - rr h); returns (sum (pp^2 - sig^2)/(2 rr), #(h < -1e-9)); writes pp."""
-    P = H.shape[0]; tot = 0.0; nv = 0
+    P = H.shape[0]
+    # Per-row partials avoid Numba's nested conditional-reduction compilation failure
+    # (numba/numba#10132) while keeping each row independent and parallel.
+    sums = np.empty(P, dtype=np.float64)
+    counts = np.empty(P, dtype=np.int64)
     for Q in prange(P):
         s = 0.0; c = 0
         for R in range(P):
@@ -488,8 +492,8 @@ def level_aug(H, sig, rq, w, rho, pp, nesplit, EAs):
             if p < 0.0: p = 0.0
             pp[Q, R] = p; s += (p*p - sg*sg)/(2*rr)
             if h < -1e-9: c += 1
-        tot += s; nv += c
-    return tot, nv
+        sums[Q] = s; counts[Q] = c
+    return sums.sum(), counts.sum()
 
 @njit(parallel=True, cache=True)
 def tri_aug(TI, V, lam, rt, gt, pt):
@@ -1096,7 +1100,7 @@ a = p.parse_args()
 if a.pw_auto > 0 and a.pw_rule: raise SystemExit("--pw_auto and --pw_rule are exclusive")
 if a.kq_mode not in ("trace", "spec"): raise SystemExit("bad kq_mode")
 
-D = os.environ.get("DATA_DIR", "/Users/ashrafkhalil/Desktop/MIE 498 RT/output/decomp_audit_2026-09-28/data/")
+D = os.environ.get("DATA_DIR", "data/")
 if not D.endswith("/"): D += "/"
 g_ = json.load(open(D+a.tag+"/graph.json")); n = g_["n"]
 keys = np.load(D+a.tag+"/keys.npy"); u = keys//n; v = keys % n; m = len(keys); L = 2*m; del keys

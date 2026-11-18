@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "lagbound"
 version = "0.1.1"
 description = "Certified upper and lower bounds for modularity maximization on large graphs"
+authors = [{ name = "Yahia Hussein" }, { name = "Samin Aref" }]
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -18,7 +19,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Yahiahu/Lagbound"
+Homepage = "https://github.com/Yahiahu/atris"
+Repository = "https://github.com/Yahiahu/atris"
 
 [project.optional-dependencies]
 cholmod = ["scikit-sparse>=0.4"]

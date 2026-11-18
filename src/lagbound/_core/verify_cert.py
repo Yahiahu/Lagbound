@@ -44,6 +44,7 @@ PSD PROOF (a different method from the certifier's CHOLMOD + a-priori Higham bou
   arithmetic that the charged value fl(1.001 * computed) dominates the allowance the proof needs; otherwise it refuses.
 Usage:
   python verify_cert.py INSTANCE_DIR CERT.npz [--method ldl|eig|sn|both|ldlsn|all] [--orig ORIG_DIR --labels LAB.npy] [--out R.json]
+For package use, import lagbound._core.verify_cert consistently so cached functions retain an importable module name.
 """
 import os, sys, time, json, math, argparse
 from fractions import Fraction

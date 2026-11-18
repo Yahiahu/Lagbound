@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite this repository."
+type: software
+title: "Atris"
+authors:
+  - family-names: Hussein
+    given-names: Yahia
+  - family-names: Aref
+    given-names: Samin
+repository-code: "https://github.com/Yahiahu/atris"
+url: "https://github.com/Yahiahu/atris"
+license: MIT

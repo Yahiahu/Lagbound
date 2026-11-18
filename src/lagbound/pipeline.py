@@ -232,7 +232,7 @@ class Workspace:
         """The verifier's exact reduction check alone (bookkeeping and eligibility of every contraction, recomputed
         from the original graph), for instances the reductions solve completely, which have no certificate."""
         out = os.path.join(self.runs, "verify.json")
-        code = ("import sys, json; sys.path.insert(0, {core!r}); import verify_cert as V\n"
+        code = ("import json; from lagbound._core import verify_cert as V\n"
                 "r = dict(passed=False)\n"
                 "try:\n"
                 "    inst = V.load_instance({rx!r}); r.update(V.check_reduction({orig!r}, {rx!r}, inst, {lab!r}))\n"
@@ -240,7 +240,7 @@ class Workspace:
                 "except V.Fail as e:\n"
                 "    r['fail'] = str(e)\n"
                 "json.dump(r, open({out!r}, 'w'), indent=1, default=float)\n").format(
-            core=CORE, rx=os.path.join(self.data, TAG + "__rx"), orig=os.path.join(self.data, TAG), lab=labels, out=out)
+            rx=os.path.join(self.data, TAG + "__rx"), orig=os.path.join(self.data, TAG), lab=labels, out=out)
         script = os.path.join(self.runs, "verify_reduction.py")
         with open(script, "w") as fh:
             fh.write(code)

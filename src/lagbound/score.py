@@ -7,7 +7,8 @@ improves on it by more than ``(U - Q) / Q``. A known better partition with modul
 
     [max(0, L - Q) / Q,  (U - Q) / Q].
 
-``CERTIFIED`` holds the bounds of the networks in the paper; scoring against one of them checks the node and edge
+``CERTIFIED`` holds the historical bounds recorded in the v0.1.1 release archive, not a fresh verification.
+Three entries differ from the current manuscript; see ``REPOSITORY_NOTES.md``. Scoring against an entry checks node and edge
 counts of the graph first. Counts do not establish graph identity: the caller must ensure the input is the same
 preprocessed graph used in the experiment.
 """
@@ -21,8 +22,9 @@ from fractions import Fraction
 from .graph import as_graph
 from .modularity import modularity
 
-# Networks of the paper (after removing directions, self-loops, duplicate edges, and isolated nodes). ``upper`` is the
-# certified and independently verified bound rounded up; ``lower`` the modularity of the VieClus partition rounded down.
+# Historical v0.1.1 table1_bounds.csv (after removing directions, self-loops, duplicate edges, and isolated nodes).
+# ``upper`` is the reported independent replay bound rounded up; ``lower`` is the VieClus modularity rounded down.
+# Preserve these recorded values until the three manuscript differences documented in REPOSITORY_NOTES.md are reconciled.
 CERTIFIED = {
     "web-Stanford": dict(nodes=281_903, edges=1_992_636, lower=0.928191, upper=0.946186),
     "eu-2005": dict(nodes=862_664, edges=16_138_468, lower=0.941574, upper=0.960156),

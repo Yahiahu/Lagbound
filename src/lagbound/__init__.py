@@ -1,4 +1,4 @@
-"""Lagbound: certified bounds for modularity maximization.
+"""Atris: certified bounds for modularity maximization (Python package ``lagbound``).
 
 >>> import lagbound
 >>> res = lagbound.bound("graph.txt")              # lower and upper bound
@@ -12,7 +12,7 @@ from .modularity import modularity
 from .pipeline import PipelineError
 from .score import CERTIFIED, Score, score
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = ["BoundResult", "CERTIFIED", "Graph", "LowerBound", "PipelineError", "Score", "UpperBound", "as_graph",
            "bound", "lower_bound", "modularity", "score", "upper_bound", "__version__"]

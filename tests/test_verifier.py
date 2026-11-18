@@ -119,3 +119,28 @@ def test_neighbour_rows_are_refused(tmp_path):
     bad = str(tmp_path / "with_mu.npz"); np.savez(bad, **z)
     res = vc.verify(inst, bad, "ldl")
     assert not res["passed"] and "mu / om" in res["fail"]
+
+
+def test_reduction_verifier_cache_is_importable_from_package(tmp_path):
+    """A subprocess-generated cache must also work for a later package import."""
+    import os
+    import subprocess
+    import sys
+
+    script = """
+import sys
+from pathlib import Path
+import networkx as nx
+from lagbound import upper_bound
+
+root = Path(sys.argv[1])
+result = upper_bound(nx.complete_graph(6), verify=True, workdir=str(root))
+assert result.status == "verified"
+from lagbound._core import verify_cert as verifier
+original, reduced = str(root / "data/g"), str(root / "data/g__rx")
+check = verifier.check_reduction(original, reduced, verifier.load_instance(reduced), None)
+assert check["contractions"]["eligible"]
+"""
+    env = dict(os.environ, NUMBA_CACHE_DIR=str(tmp_path / "cache"))
+    subprocess.run([sys.executable, "-c", script, str(tmp_path / "run")],
+                   env=env, check=True, capture_output=True, text=True, timeout=120)

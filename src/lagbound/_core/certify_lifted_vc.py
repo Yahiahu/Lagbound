@@ -619,7 +619,7 @@ def main():
     pa.add_argument("--no_vc", type=int, default=0); pa.add_argument("--no_tri", type=int, default=0); pa.add_argument("--no_pair", type=int, default=0); pa.add_argument("--use_psi", type=int, default=1)
     pa.add_argument("--dump_only", type=int, default=0); pa.add_argument("--out", default=""); pa.add_argument("--dump_cert", default="", help="save the exact certificate (npz) for verify_cert.py")
     a = pa.parse_args()
-    D = os.environ.get("DATA_DIR", "/Users/ashrafkhalil/Desktop/MIE 498 RT/output/decomp_audit_2026-09-28/data/")
+    D = os.environ.get("DATA_DIR", "data/")
     P = load_problem(a.tag, a.ckpt, D, use_psi=a.use_psi, initV=a.initV)
     if a.no_vc: P["vcs"] = []
     if a.no_tri: P["TI"] = P["TI"][:0]; P["lam"] = P["lam"][:0]          # dropping multipliers is always valid

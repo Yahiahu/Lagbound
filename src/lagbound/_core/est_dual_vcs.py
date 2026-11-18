@@ -161,7 +161,7 @@ p.add_argument("--escape_ratio", type=float, default=0.3, help="append eigenvect
 a = p.parse_args()
 rng = np.random.default_rng(a.seed)
 
-D = os.environ.get("DATA_DIR", "/Users/ashrafkhalil/Desktop/MIE 498 RT/output/decomp_audit_2026-09-28/data/")
+D = os.environ.get("DATA_DIR", "data/")
 if not D.endswith("/"): D += "/"
 t0 = time.time()
 import resource
