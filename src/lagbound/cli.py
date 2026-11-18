@@ -2,11 +2,32 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import math
+import os
 import sys
 
 from .api import bound
 from .score import CERTIFIED, read_partition, score
+
+
+@contextlib.contextmanager
+def _json_progress(enabled):
+    """Keep native solver banners and Python progress off the JSON stream."""
+    if not enabled:
+        yield
+        return
+    sys.stdout.flush()
+    saved = os.dup(1)
+    try:
+        os.dup2(2, 1)
+        with contextlib.redirect_stdout(sys.stderr):
+            yield
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved, 1)
+        os.close(saved)
 
 
 def score_main(argv) -> int:
@@ -67,36 +88,55 @@ def main(argv=None) -> int:
                    help="factorization backend of the certificate (auto: cholmod if installed, else superlu)")
     p.add_argument("--verify", action="store_true", help="re-check the certificate with the independent verifier")
     p.add_argument("--verify-max-gb", type=float, default=120, help="memory cap of the verifier's factor, GB (120)")
+    p.add_argument("--tighten", action="store_true", help="try the optional small-instance triangle LP")
+    p.add_argument("--tighten-time-limit", type=float, default=600, help="additional triangle-LP search budget, seconds (600)")
+    p.add_argument("--tighten-memory-gb", type=float, default=8, help="triangle-LP allocation estimate budget, GiB (8)")
+    p.add_argument("--target-percent", type=float, help="stop tightening when this within-optimal percentage is met")
+    p.add_argument("--partition", help="incumbent 'node cluster' file; --upper-only skips heuristic search")
     p.add_argument("--threads", type=int, default=None, help="solver threads (all cores)")
     p.add_argument("--workdir", default=None, help="keep checkpoints, certificate, and logs here")
     p.add_argument("--partition-out", default=None, help="write the best partition here ('node cluster' per line)")
     p.add_argument("--json", action="store_true", help="print the result as JSON")
     p.add_argument("-q", "--quiet", action="store_true", help="no progress messages")
     a = p.parse_args(argv)
+    if a.target_percent is not None and not a.tighten:
+        p.error("--target-percent requires --tighten")
+    if a.tighten and (a.no_certify or a.lower_only):
+        p.error("--tighten requires an upper bound with certification")
 
-    res = bound(a.graph, lower=not a.upper_only, upper=not a.lower_only, time_limit=a.time_limit, seeds=a.seeds,
-                refine_time=a.refine_time, certify=not a.no_certify, verify=a.verify, workdir=a.workdir,
-                verbose=not a.quiet, threads=a.threads, levels=tuple(a.levels), vc_level=a.vc_level,
-                max_clusters=a.max_clusters, fill_filter=a.fill_filter, margin=a.margin, bisect=a.bisect,
-                bisect_lo=a.bisect_lo, backend=a.backend, verify_max_gb=a.verify_max_gb)
+    with _json_progress(a.json):
+        res = bound(a.graph, lower=not a.upper_only, upper=not a.lower_only, time_limit=a.time_limit, seeds=a.seeds,
+                    refine_time=a.refine_time, certify=not a.no_certify, verify=a.verify, workdir=a.workdir,
+                    verbose=not a.quiet, threads=a.threads, levels=tuple(a.levels), vc_level=a.vc_level,
+                    max_clusters=a.max_clusters, fill_filter=a.fill_filter, margin=a.margin, bisect=a.bisect,
+                    bisect_lo=a.bisect_lo, backend=a.backend, verify_max_gb=a.verify_max_gb,
+                    partition=read_partition(a.partition) if a.partition else None,
+                    tighten=a.tighten, tighten_time_limit=a.tighten_time_limit,
+                    tighten_memory_gb=a.tighten_memory_gb, target_percent=a.target_percent)
 
     if a.partition_out and res.partition is not None:
         with open(a.partition_out, "w") as fh:
             for node, cluster in res.partition.items():
                 fh.write(f"{node} {cluster}\n")
     if a.json:
-        out = {"gap": res.gap, "absolute_gap": res.absolute_gap}
+        out = {"gap": res.gap, "absolute_gap": res.absolute_gap,
+               "within_percent": None if res.within_percent is None else f"{math.ceil(100 * res.within_percent) / 100:.2f}",
+               "within_percent_exact": None if res.within_percent is None else str(res.within_percent)}
         if res.lower is not None:
             out["lower"] = {"value": res.lower.value, "exact": str(res.lower.exact),
                             "clusters": int(res.lower.membership.max()) + 1, "seconds": res.lower.seconds}
         if res.upper is not None:
             out["upper"] = {"value": res.upper.value, "status": res.upper.status, "estimate": res.upper.estimate,
+                            "exact": None if res.upper.exact is None else str(res.upper.exact),
                             "certificate": res.upper.certificate, "workdir": res.upper.workdir,
-                            "seconds": res.upper.seconds}
+                            "seconds": res.upper.seconds,
+                            "tightening": res.upper.details.get("tightening")}
         json.dump(out, sys.stdout, indent=1)
         print()
     else:
         print(res.summary())
+        if res.within_percent is not None:
+            print(f"within       {math.ceil(100 * res.within_percent) / 100:.2f}% of optimal")
         if res.upper is not None and res.upper.certificate:
             print(f"certificate  {res.upper.certificate}")
     return 0

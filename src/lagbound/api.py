@@ -50,11 +50,27 @@ class UpperBound:
     workdir: str
     stages: list = field(default_factory=list)
 
+    @property
+    def exact(self) -> Fraction | None:
+        """Accepted rational bound, or None for estimates/rejected results.
+
+        Triangle and reduction proofs retain exact rationals. Other accepted
+        bounds use the exact binary value of the outward-rounded float.
+        """
+        if self.status not in ("certified", "verified"):
+            return None
+        if self.details.get("method") == "triangle_lp" or self.details.get("solved_by_reduction"):
+            return Fraction(self.details["exact"])
+        return Fraction(self.value)
+
     def verify(self, method: str = "auto", max_gb: float | None = None) -> dict:
         """Re-check the certificate with the independent verifier; ``method`` is ``ldl``, ``sn``, ``eig``, or
         ``auto`` (``ldl`` up to about 10^9 factor nonzeros, ``sn`` beyond). ``max_gb`` caps the supernodal factor."""
         if self.certificate is None:
             raise ValueError("no certificate to verify")
+        if self.details.get("method") == "triangle_lp":
+            from .triangle_certificate import verify_triangle_certificate
+            return verify_triangle_certificate(self.certificate)
         ws = Workspace(None, self.workdir)
         return ws.verify(self.certificate, _verify_method(method, self.details), self.details.get("labels"),
                          max_gb or self.details.get("verify_max_gb", 120.0))
@@ -90,6 +106,19 @@ class BoundResult:
     @property
     def partition(self) -> dict | None:
         return None if self.lower is None else self.lower.partition
+
+    @property
+    def within_percent(self) -> Fraction | None:
+        """Exact percentage expression for verified bounds, or None when L <= 0.
+
+        Round this Fraction upward when displaying a claimed guarantee.
+        """
+        if self.lower is None or self.upper is None or self.lower.exact <= 0 or self.upper.status != "verified":
+            return None
+        u = self.upper.exact
+        if u < self.lower.exact:
+            raise ValueError("upper bound is below the exact partition score")
+        return 100 * (u - self.lower.exact) / u
 
     def summary(self) -> str:
         rows = []
@@ -163,7 +192,7 @@ def _solved_by_reduction(ws: Workspace, labels: str, verify: bool, t0: float) ->
                       seconds=time.time() - t0, workdir=ws.root, stages=stages)
 
 
-def upper_bound(graph, time_limit: float = 3600.0, partition=None, lower: float | None = None,
+def _sdp_upper_bound(graph, time_limit: float = 3600.0, partition=None, lower: float | None = None,
                 levels: tuple = (16, 64), vc_level: float = 64, max_clusters: int = 6000,
                 proximal_fraction: float = 0.4, fill_filter: bool = False, certify: bool = True,
                 margin: float = 2.0, bisect: int = 0, bisect_lo: float = 0.0, backend: str = "auto",
@@ -268,21 +297,115 @@ def upper_bound(graph, time_limit: float = 3600.0, partition=None, lower: float 
                       seconds=time.time() - t0, workdir=ws.root, stages=stages)
 
 
+def upper_bound(graph, time_limit: float = 3600.0, partition=None, lower: float | None = None,
+                levels: tuple = (16, 64), vc_level: float = 64, max_clusters: int = 6000,
+                proximal_fraction: float = 0.4, fill_filter: bool = False, certify: bool = True,
+                margin: float = 2.0, bisect: int = 0, bisect_lo: float = 0.0, backend: str = "auto",
+                verify: bool = False, verify_method: str = "auto", verify_max_gb: float = 120.0,
+                threads: int | None = None, max_iterations: int = 3000, workdir: str | None = None,
+                verbose: bool = False, *, tighten: bool = False, tighten_time_limit: float = 600.0,
+                tighten_memory_gb: float = 8.0, target_percent: float | None = None) -> UpperBound:
+    """SDP upper bound, optionally followed by certified small-instance tightening.
+
+    Existing SDP settings and defaults are unchanged. ``tighten=True`` tries a
+    triangle LP on the ORIGINAL simple graph if its allocation estimate fits
+    ``tighten_memory_gb`` (GiB). It has a separate ``tighten_time_limit`` budget
+    and retains the better accepted bound. ``target_percent`` controls only this
+    optional step, using the exact score of ``partition``; ``lower`` is log-only.
+    The LP certificate is always independently replayed, even if ``verify=False``.
+    """
+    from .triangle import _check_options, _target_met, pair_lp_memory_gb, triangle_bound
+    _check_options(tighten_time_limit, tighten_memory_gb, target_percent)
+    if target_percent is not None and not tighten:
+        raise ValueError("target_percent requires tighten=True and controls only tightening")
+    if tighten and not certify:
+        raise ValueError("tightening requires certification; omit certify=False")
+    g = as_graph(graph)
+    exact_lower = modularity(g, partition, exact=True) if partition is not None else None
+    if tighten and tighten_time_limit > 0 and pair_lp_memory_gb(g.n) <= tighten_memory_gb:
+        try:
+            import highspy  # noqa: F401 -- fail before the SDP run if the extra is absent
+        except ImportError as err:
+            raise ImportError('Triangle tightening requires highspy; install ".[tighten]" from the repository clone') from err
+    result = _sdp_upper_bound(g, time_limit=time_limit, partition=partition, lower=lower, levels=levels,
+                             vc_level=vc_level, max_clusters=max_clusters, proximal_fraction=proximal_fraction,
+                             fill_filter=fill_filter, certify=certify, margin=margin, bisect=bisect,
+                             bisect_lo=bisect_lo, backend=backend, verify=verify, verify_method=verify_method,
+                             verify_max_gb=verify_max_gb, threads=threads, max_iterations=max_iterations,
+                             workdir=workdir, verbose=verbose)
+    if not tighten:
+        return result
+    accepted = result.status in ("certified", "verified")
+    current = result.exact if accepted else Fraction(1)
+    if accepted and exact_lower is not None and current < exact_lower:
+        raise ArithmeticError("SDP upper bound is below the exact partition score")
+    if accepted and _target_met(exact_lower, current, target_percent):
+        result.details["tightening"] = dict(run=False, stop="target met")
+        return result
+    if result.details.get("solved_by_reduction") and accepted:
+        result.details["tightening"] = dict(run=False, stop="solved by reduction")
+        return result
+    if tighten_time_limit == 0 or pair_lp_memory_gb(g.n) > tighten_memory_gb:
+        result.details["tightening"] = dict(run=False, stop="time budget" if tighten_time_limit == 0 else "memory estimate")
+        return result
+    started = time.monotonic()
+    try:
+        tri = triangle_bound(g, partition=partition, time_limit=tighten_time_limit, memory_gb=tighten_memory_gb,
+                             target_percent=target_percent, workdir=os.path.join(result.workdir, "tightening"))
+    except (RuntimeError, MemoryError, ArithmeticError, OSError) as err:
+        elapsed = time.monotonic() - started
+        result.details["tightening"] = dict(run=True, stop="failed", error=str(err), seconds=elapsed)
+        result.seconds += elapsed
+        result.stages.append(("triangle tightening failed", result.seconds))
+        return result
+    info = dict(run=True, value=tri.value, status=tri.status, certificate=tri.certificate,
+                stop=tri.details["stop"], seconds=tri.seconds)
+    if tri.status == "verified" and (not accepted or tri.exact < result.exact):
+        tri.details["sdp"] = dict(value=result.value, status=result.status, certificate=result.certificate)
+        tri.details["tightening"] = info
+        tri.seconds += result.seconds
+        tri.stages = result.stages + [("triangle tightening", tri.seconds)]
+        return tri
+    result.details["tightening"] = info
+    result.seconds += tri.seconds
+    result.stages.append(("triangle tightening", result.seconds))
+    return result
+
+
 def bound(graph, lower: bool = True, upper: bool = True, time_limit: float = 3600.0, seeds: int = 10,
           refine_time: float = 60.0, certify: bool = True, verify: bool = False, workdir: str | None = None,
-          verbose: bool = False, **upper_options) -> BoundResult:
+          verbose: bool = False, partition=None, **upper_options) -> BoundResult:
     """Return a heuristic partition and an upper bound (both components by default).
 
     The Leiden/ensemble partition supplies the lower bound and initializes the upper-bound search.
     Use ``verify=True`` for independent verification, and inspect the returned status before reporting
-    a guarantee. For an external incumbent, call ``upper_bound(partition=...)`` and evaluate its
-    modularity separately. This wrapper does not implement target-based stopping or fallback after rejection.
+    a guarantee. ``partition`` supplies an optional incumbent. It is compared
+    exactly against the heuristic result and the all-in-one partition. Use
+    ``lower=False`` to assess an incumbent without running the heuristic.
     """
     g = as_graph(graph)
     lb = lower_bound(g, seeds=seeds, refine_time=refine_time, workdir=workdir, verbose=verbose) if lower else None
+    if partition is not None or lb is not None:
+        candidates = [(Fraction(0), np.zeros(g.n, dtype=np.int64))]
+        if lb is not None:
+            candidates.append((lb.exact, lb.membership))
+        if partition is not None:
+            membership = np.unique(as_membership(g, partition), return_inverse=True)[1]
+            candidates.append((modularity(g, membership, exact=True), membership))
+        q, membership = max(candidates, key=lambda item: item[0])
+        lb = LowerBound(float(q), q, membership, g.partition_dict(membership),
+                        0.0 if lb is None else lb.seconds, workdir)
     ub = None
     if upper:
         ub = upper_bound(g, time_limit=time_limit, partition=None if lb is None else lb.membership,
                          lower=None if lb is None else lb.value, certify=certify, verify=verify, workdir=workdir,
                          verbose=verbose, **upper_options)
+    if lb is not None and ub is not None and (partition is not None or upper_options.get("tighten")):
+        # Retain the feasible partition alongside the bound, including when SDP wins.
+        path = os.path.join(ub.workdir, "incumbent.json")
+        with open(path, "w") as fh:
+            json.dump(dict(nodes=g.n, edges=g.m, node_order="as_graph(graph).labels",
+                           membership=lb.membership.tolist(),
+                           modularity_exact=str(lb.exact)), fh)
+        ub.details["incumbent"] = path
     return BoundResult(lower=lb, upper=ub)

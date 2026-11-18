@@ -15,8 +15,11 @@ from .graph import Graph, as_graph
 from .modularity import modularity
 from .pipeline import PipelineError
 from .score import CERTIFIED, Score, score
+from .triangle import triangle_bound
+from .triangle_certificate import verify_triangle_certificate
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __all__ = ["BoundResult", "CERTIFIED", "Graph", "LowerBound", "PipelineError", "Score", "UpperBound", "as_graph",
-           "bound", "lower_bound", "modularity", "score", "upper_bound", "__version__"]
+           "bound", "lower_bound", "modularity", "score", "upper_bound", "triangle_bound",
+           "verify_triangle_certificate", "__version__"]

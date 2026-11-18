@@ -63,11 +63,12 @@ or the computational budget is exhausted. An unsuccessful verification leaves th
 The output is the retained partition, `L`, `U`, the percentage when `L > 0`, and whether a supplied target was met.
 Validity of an accepted bound does not require the low-rank search to reach a global optimum.
 
-The current Python wrapper exposes partition search, bound computation, and verification. Its combined `bound()`
+The Python wrapper exposes partition search, bound computation, and verification. Its combined `bound()`
 call uses Leiden with ensemble refinement. The manuscript's large-network experiments use VieClus partitions,
 which can be supplied through the [incumbent workflow](#using-an-incumbent-partition). The wrapper does not yet
-automate Algorithm 1's target-based stopping loop or its fallback to the previously accepted bound after rejection.
-Inspect the returned status before reporting a guarantee.
+automate Algorithm 1's full target-based SDP search loop. The optional small-instance step described below
+retains the better accepted bound and can stop when a supplied target is met. Inspect the returned status before
+reporting a guarantee.
 
 ## Reported results
 
@@ -100,6 +101,29 @@ release records. The [repository notes](REPOSITORY_NOTES.md#historical-results-a
 both sets of values. The original eight large-network certificates are unavailable, so the release cannot replay
 those proofs. These reported results should be read with the [available evidence and limitations](#research-files-and-limitations).
 
+### Small-network study and the two largest remaining gaps
+
+The November 18 study evaluated 155 networks with known optima, using VieClus partitions and Atris v0.1.1
+plus a separate triangle-LP tightening script. Across the 152 networks with positive optimal modularity,
+the median reported percentage fell from approximately **0.41% to 0.02%**, and the mean from **1.22% to 0.37%**.
+**150 of 152** were within **4.97% of optimal** after taking the better bound. The three zero-optimum complete
+graphs are treated separately. Known optima were used only for subsequent checks, not to construct the bounds.
+See [the per-network records, settings, and evidence limits](docs/SMALL_NETWORKS.md).
+
+The two largest remaining gaps were on **cattle** and **high_tech_company**. Their recorded partition scores
+match the known optima. The absolute differences between the SDP upper bounds and those optima are only
+about **0.00657** and **0.00347**, but the low modularity values (about 0.10217 and 0.05465) make the percentage
+gaps larger. The conservative two-decimal guarantees are **within 6.04% and 5.98% of optimal**, respectively.
+The triangle LP reported numerical convergence but gave weaker bounds on these instances, so tightening retained
+the SDP bounds. These observations distinguish finding an optimal partition from certifying it tightly.
+They do **not** establish that Atris reached its relaxation's optimum, that density caused the gap, or that no
+other relaxation could do better.
+
+The current code integrates this optional step with exact outward rounding, saved proof data, and independent
+certificate replay. The historical scalar records are not substitutes for the original certificates, and the
+updated implementation is not claimed to have rerun all 155 experiments. No tolerance-based count is described
+as a proof of optimality.
+
 ## Install
 
 ```bash
@@ -119,6 +143,9 @@ startup time. Later runs use the cache in `~/.cache/lagbound/numba`.
 Optional: `pip install scikit-sparse` (needs SuiteSparse) makes the certificate use CHOLMOD instead of SciPy's
 SuperLU. On large graphs this is required in practice.
 
+For small-instance tightening, install the additional solver with `pip install -e ".[tighten]"` from a clone,
+or use `lagbound[networkx,tighten]` in the GitHub installation command. The SDP workflow does not require HiGHS.
+
 ## Usage
 
 ### Return a partition and its guarantee
@@ -135,7 +162,7 @@ def within_percent(lower_exact, upper_result):
     """Conservative percentage, after independent verification and for L > 0."""
     if upper_result.status != "verified" or lower_exact <= 0:
         return None
-    U = Fraction(upper_result.value)
+    U = upper_result.exact
     if U < lower_exact:
         raise ValueError("The upper bound is below the partition's exact modularity")
     return ceil(10000 * (U - lower_exact) / U) / 100
@@ -180,8 +207,63 @@ else:
 ```
 
 `upper_bound(partition=...)` uses the supplied partition to initialize the bound search. The partition remains the
-feasible solution being assessed. The `lower` argument only affects progress logs. The current `bound()` wrapper
-does not accept an incumbent directly, so use this workflow when supplying one.
+feasible solution being assessed. The `lower` argument only affects progress logs. The combined wrapper also accepts
+`bound(G, partition=my_partition, lower=False, verify=True)` to assess an incumbent without running a heuristic.
+With the default `lower=True`, it retains the best exactly evaluated partition among the incumbent, heuristic
+result, and all-in-one partition.
+
+### Optional small-instance tightening
+
+```python
+res = lagbound.bound(
+    G, partition=my_partition, lower=False, verify=True, workdir="tightened-run",
+    tighten=True, tighten_time_limit=600, tighten_memory_gb=8,
+    target_percent=1.0,
+)
+if res.within_percent is not None:
+    print(f"Within {ceil(100 * res.within_percent) / 100:.2f}% of optimal")
+print(res.upper.details.get("tightening"))
+```
+
+Tightening is **off by default**. When enabled, it works on the original simple graph, after the SDP pipeline.
+It is skipped when the exact reductions solve the graph, the supplied partition already meets the target, the
+additional search budget is zero, or the full-pair allocation estimate exceeds `tighten_memory_gb` (GiB).
+The default 8 GiB gate excludes all eight million-node benchmarks before allocating pair variables.
+The memory estimate is a planning guard, not an OS-enforced RSS limit. `tighten_time_limit` is an additional
+LP search budget; graph preparation, exact certificate construction, and replay can add wall-clock time.
+`target_percent` controls only tightening and requires `tighten=True`. It uses an exactly evaluated partition,
+never a caller-supplied floating-point `lower` value. A target need not be achievable.
+
+The step maximizes the modularity objective over pair variables in `[0,1]` with triangle inequalities.
+Violated triangles are added in bounded batches. For rows `Gx <= 1` and any nonnegative multipliers `y`,
+
+```text
+w.x <= sum(y) + sum(max(0, w - G.T y)).
+```
+
+Here `w_ij = 2*(2m*A_ij - d_i*d_j)`; add `-sum(d_i*d_i)` and divide by `(2m)^2` for modularity.
+Solver multipliers are rounded to nonnegative rationals, and the bound is recomputed with integer arithmetic.
+This bound remains valid when optimization stops early. Numerical convergence is reported separately from proof
+validity. The implementation follows the triangle-LP approach of
+[Agarwal and Kempe](https://doi.org/10.1140/epjb/e2008-00425-1), also studied by
+[Veldt et al.](https://doi.org/10.1137/18M1217152).
+
+The better accepted bound is returned. If the LP does not improve the SDP bound, the SDP certificate and status
+are retained. The LP result is always independently replayed with exact arithmetic, including when the SDP's
+`verify` option is off. Saved JSON proofs contain the normalized graph and its checksum, active triangle rows,
+rational multipliers, exact upper bound, and the supplied partition and exact score when available.
+
+```python
+# Run the LP alone, or replay its proof without importing HiGHS.
+tri = lagbound.triangle_bound(G, partition=my_partition, time_limit=600, workdir="triangle-run")
+check = lagbound.verify_triangle_certificate(tri.certificate, G)
+assert check["passed"]
+```
+
+Supplying `G` checks the normalized graph identity, including node order. Without it, replay verifies the graph
+embedded in the certificate. An exact `optimal=True` result requires equality of the replayed rational bound
+and the exactly evaluated saved partition score, not a tolerance test. Incumbents are also retained in
+`incumbent.json` when the combined wrapper uses an incumbent or requests tightening.
 
 ### Reusing the upper bound
 
@@ -234,6 +316,10 @@ lagbound graph.txt --verify --partition-out partition.txt --workdir run1
 lagbound graph.txt --lower-only --partition-out partition.txt
 lagbound graph.txt --upper-only --time-limit 7200 --verify --workdir bound-run
 
+# Assess an external partition and try small-instance tightening.
+lagbound graph.txt --partition partition.txt --upper-only --verify --tighten \
+  --tighten-time-limit 600 --tighten-memory-gb 8 --target-percent 1 --workdir small-run
+
 # Inspect structured results or assess a partition against an existing bound.
 lagbound graph.txt --verify --json
 lagbound score graph.txt partition.txt --upper 0.912993 --lower 0.867665 --json
@@ -258,12 +344,14 @@ Its default runs both components. `lower=False` or `upper=False` selects just on
 | | `exact`, `value` | partition modularity as a `Fraction` and as a float |
 | | `membership` | communities of non-isolated nodes, in `as_graph(G).labels` order |
 | `UpperBound` | `value`, `status` | candidate or accepted value, with the status below |
+| | `exact` | accepted rational bound, or `None` for an estimate/rejected result |
 | | `estimate` | search estimate before certification |
-| | `certificate` | stored certificate path (`.npz`), when a certificate is needed |
+| | `certificate` | SDP proof (`.npz`) or triangle-LP proof (`.json`), when needed |
 | | `details`, `workdir` | stage summaries, checkpoints, and logs |
 | | `verify()` | run the independent verifier and return its report |
 | `BoundResult` | `absolute_gap` | floating-point `U - L` |
 | | `gap` | floating-point `(U - L) / L`, or `None` for `L <= 0` |
+| | `within_percent` | exact `Fraction` for `100*(U-L)/U` when `L>0` and the upper bound is verified |
 
 | `upper.status` | Meaning |
 |---|---|
@@ -354,6 +442,8 @@ src/lagbound/
   graph.py       graph input
   modularity.py  exact modularity
   score.py       score a partition against a certified bound
+  triangle.py    optional small-instance LP search and certificate construction
+  triangle_certificate.py  independent integer-arithmetic proof replay
   cli.py         command line
   _core/         research optimization and certification routines
 ```
@@ -386,7 +476,7 @@ differences between the archived bounds and the current manuscript.
 ## Tests
 
 ```bash
-pip install -e ".[test]"
+pip install -e ".[test,tighten]"
 pytest
 ```
 

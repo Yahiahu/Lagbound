@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lagbound"
-version = "0.1.1"
+version = "0.1.2"
 description = "Atris algorithm for large-scale modularity maximization with approximation guarantees"
 authors = [{ name = "Yahia Hussein" }, { name = "Samin Aref" }]
 readme = "README.md"
@@ -26,6 +26,7 @@ Repository = "https://github.com/Yahiahu/atris"
 cholmod = ["scikit-sparse>=0.4"]
 networkx = ["networkx>=2.6"]
 test = ["pytest>=7", "networkx>=2.6"]
+tighten = ["highspy>=1.16,<2"]
 
 [project.scripts]
 lagbound = "lagbound.cli:main"

@@ -69,8 +69,10 @@ class Score:
 
 
 def _round(x: Fraction, digits: int, up: bool) -> float:
+    from .triangle_certificate import upper_float
     s = 10 ** digits
-    return (math.ceil(x * s) if up else math.floor(x * s)) / s
+    q = Fraction(math.ceil(x * s) if up else math.floor(x * s), s)
+    return upper_float(q) if up else -upper_float(-q)
 
 
 def score(graph, partition, upper: float | None = None, lower: float | None = None, network: str | None = None) -> Score:
