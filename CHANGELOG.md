@@ -1,5 +1,12 @@
 # Changes
 
+## Documentation — November 19, 2026
+
+- Align the algorithm overview and results documentation with the revised manuscript's optional tightening step.
+- Include all three small-network component runtimes and their recorded values in the reproducible summary.
+  These are separate measurements, not end-to-end timings or a comparison on common hardware.
+- No algorithm, default settings, or reported bound values changed in this documentation update.
+
 ## 0.1.2 — November 18, 2026
 
 - Add opt-in triangle-LP tightening through `tighten=True` / `--tighten`, with separate time and memory estimates,
@@ -14,7 +21,7 @@
 - Document the 155-network research records and the two largest remaining gaps. Remove tolerance-based optimality
   claims from the published summary and distinguish historical scalar consistency checks from proof replay.
 
-The manuscript and the eight large-network result values are unchanged. This version does not claim a rerun of
+This code update did not change the manuscript or the eight large-network result values. It does not claim a rerun of
 all 155 historical experiments or introduce an exact-solver/branching fallback.
 
 Validation on macOS with Python 3.12 and HiGHS 1.16.0 passed all 75 tests, with 11 expected graph-normalization

@@ -46,12 +46,23 @@ only when the replayed rational upper bound equals the exactly recomputed score 
 
 ## Configuration and timing
 
-The research runs used a 30-second VieClus request per network. SDP upper bounds used the v0.1.1 defaults,
+The research runs used a 30-second VieClus request per network with seed zero. SDP upper bounds used the v0.1.1 defaults,
 including a 3,600-second search budget and a 3,000-iteration cap per phase, with independent verification requested.
 The triangle LP used one solver thread, an 8 GiB allocation estimate budget, and a configured 600-second search
-budget. Both components were run separately, and their smaller accepted bound was selected afterwards.
+budget. The SDP and LP components were run separately, and their smaller accepted bound was selected afterwards.
 
-The median recorded triangle runtime was approximately 0.89 seconds. The LP reported numerical convergence on
+The recorded component runtimes across all 155 networks are:
+
+| Component | Median (seconds) | Maximum (seconds) |
+|---|---:|---:|
+| VieClus | 30.01 | 30.06 |
+| SDP upper-bound computation | 68.10 | 607.69 |
+| Triangle-LP tightening | 0.89 | 501.66 |
+
+The per-network timings are included in the recorded CSV and reproduced by `summarize.py`. These separately
+recorded components do not provide a measured end-to-end runtime or a comparison on common hardware.
+
+The LP reported numerical convergence on
 143 instances and a solver time-limit status on 12. Those 12 runs ended after approximately 306–502 seconds,
 not after 600 seconds of wall time. The research script reset HiGHS's time limit without accounting for accumulated
 solver time. The package integration accounts for cumulative solver time. Therefore, trajectories and final

@@ -1,6 +1,6 @@
 # Results reported in the Atris manuscript
 
-These tables follow the November 18, 2026 draft of *Atris Algorithm for Large-Scale Modularity Maximization with
+These tables follow the November 19, 2026 revision of *Atris Algorithm for Large-Scale Modularity Maximization with
 Approximation Guarantees*, by Yahia Hussein and Samin Aref. They describe the manuscript's experiments. The
 package's default lower-bound heuristic is Leiden with ensemble refinement, whereas the large-network results
 below use externally generated VieClus partitions.
@@ -33,6 +33,14 @@ An optimum or best score is matched within `1e-9` in modularity. Best scores are
 on each network. GNN-2500 returned results on 59 of the 60 reference instances. VieClus's complete coverage and
 high modularity under these conditions motivate its use for the large-network experiments. These observations
 do not establish that it will be optimal on other networks.
+
+## Approximation guarantees on small networks
+
+The additional 155-network study uses VieClus partitions, the v0.1.1 SDP pipeline, and a separately run triangle LP.
+Taking the smaller bound lowers the median percentage from 0.41% to 0.02% on the 152 positive-optimum networks.
+The [small-network results](SMALL_NETWORKS.md) provide the full summary, component runtimes, per-network records,
+and the two exceptions above 4.97%. Known optima are used only for subsequent checks. This study does not change
+the eight large-network results below.
 
 ## Approximation guarantees on large networks
 

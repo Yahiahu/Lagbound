@@ -60,6 +60,9 @@ Atris then tightens `U` through four steps:
 
 The algorithm keeps each improvement in the verified upper bound and stops when the requested percentage is reached
 or the computational budget is exhausted. An unsuccessful verification leaves the previously accepted bound intact.
+When enabled, [small-instance tightening](#optional-small-instance-tightening) then tries an additional triangle-LP
+bound if the target is unmet or unspecified and the pair formulation passes the memory estimate. It keeps the smaller
+verified bound. This optional step is skipped on all eight large networks.
 The output is the retained partition, `L`, `U`, the percentage when `L > 0`, and whether a supplied target was met.
 Validity of an accepted bound does not require the low-rank search to reach a global optimum.
 

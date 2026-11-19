@@ -42,6 +42,11 @@ def summarize(path):
               f"mean {float(statistics.mean(values)):.2f}%, worst {float(max(values)):.2f}% (nearest rounding)")
         print("  " + ", ".join(f"within {t}%: {sum(v <= Fraction(t) for v in values)}/{len(values)}"
                                 for t in ("1", "1.85", "4.97")))
+    print("Separately recorded component runtimes; not measured end-to-end times:")
+    for label, field in [("VieClus", "vieclus_seconds"), ("SDP", "atris_seconds"),
+                         ("Triangle LP", "triangle_seconds")]:
+        values = [float(row[field]) for row in rows]
+        print(f"{label}: median {statistics.median(values):.2f}s, maximum {max(values):.2f}s")
     return rows
 
 
